@@ -86,7 +86,11 @@ class PersonCrowdIntelligenceEngine {
     detections: Detection[],
     frameWidth: number,
     frameHeight: number,
-    options?: { generalNarrationEnabled?: boolean; language?: 'en' | 'hi' | 'pa' }
+    options?: {
+      generalNarrationEnabled?: boolean
+      language?: 'en' | 'hi' | 'pa'
+      suppressRoutinePersonVoice?: boolean
+    }
   ): PersonTrackerStatus {
     const now = Date.now()
     const frameArea = Math.max(1, frameWidth * frameHeight)
@@ -227,7 +231,13 @@ class PersonCrowdIntelligenceEngine {
 
     // Dispatch Intelligent Non-Repetitive Announcements
     if (shouldSpeak) {
-      this.handleVoiceAnnouncements(now, lang, closestPerson, personCount)
+      this.handleVoiceAnnouncements(
+        now,
+        lang,
+        closestPerson,
+        personCount,
+        options?.suppressRoutinePersonVoice ?? false,
+      )
     }
 
     return {
@@ -249,7 +259,8 @@ class PersonCrowdIntelligenceEngine {
     now: number,
     lang: 'en' | 'hi' | 'pa',
     closestPerson: TrackedPerson | null,
-    personCount: number
+    personCount: number,
+    suppressRoutinePersonVoice: boolean,
   ) {
     const timeSinceLast = now - this.lastAnnouncementTime
 
@@ -285,6 +296,10 @@ class PersonCrowdIntelligenceEngine {
         }
       }
 
+      // Keep the object currently in the scan focus as the narration target.
+      // Very-close person alerts above remain enabled as a safety exception.
+      if (suppressRoutinePersonVoice) return
+
       // Group presence announcement (Announced ONCE per crowd event, never repeated non-stop)
       if (this.lastAnnouncedState !== 'CROWD_DETECTED' || timeSinceCrowd >= this.CROWD_COOLDOWN_MS) {
         this.lastAnnouncedState = 'CROWD_DETECTED'
@@ -315,6 +330,7 @@ class PersonCrowdIntelligenceEngine {
         break
 
       case 'PERSON_NEARBY':
+        if (suppressRoutinePersonVoice) break
         // Moderate distance -> Announce ONCE only when first entering nearby state
         if (this.lastAnnouncedState !== 'PERSON_NEARBY') {
           this.lastAnnouncedState = 'PERSON_NEARBY'
@@ -336,6 +352,7 @@ class PersonCrowdIntelligenceEngine {
         break
 
       case 'PERSON_APPROACHING':
+        if (suppressRoutinePersonVoice) break
         // Approaching confirmed across observations -> Announce ONCE
         if (this.lastAnnouncedState !== 'PERSON_APPROACHING') {
           this.lastAnnouncedState = 'PERSON_APPROACHING'

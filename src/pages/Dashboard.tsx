@@ -397,6 +397,9 @@ export default function Dashboard() {
         const objects = analyzeSceneObjects(results, video.videoWidth, video.videoHeight)
         const prioritizedDetections = objects.map((object) => object.detection)
         const elapsed = performance.now() - start
+        const focusedObjectPresent = prioritizedDetections.some(
+          detection => detection.class.toLowerCase() !== 'person',
+        )
 
         setDetections(prioritizedDetections)
         setSceneObjects(objects)
@@ -404,7 +407,9 @@ export default function Dashboard() {
         drawDetections(prioritizedDetections)
         setInferenceMs(Math.round(elapsed))
         setFps(Math.round(1000 / Math.max(elapsed, 1)))
-        processDetectionsForProximity(prioritizedDetections, video.videoWidth, video.videoHeight)
+        processDetectionsForProximity(prioritizedDetections, video.videoWidth, video.videoHeight, {
+          suppressRoutinePersonVoice: focusedObjectPresent,
+        })
         setSensorDistance(getSensorDistance())
 
         // Process empty frames too, so trackers can clear stale targets after
@@ -412,6 +417,7 @@ export default function Dashboard() {
         PersonTracker.processFrame(results, video.videoWidth, video.videoHeight, {
           generalNarrationEnabled: audioEnabled,
           language: speechLanguage,
+          suppressRoutinePersonVoice: focusedObjectPresent,
         })
 
         // Narrate detected objects (including non-road objects) in the chosen language.

@@ -19,7 +19,10 @@ import { VoiceManager, type VoiceStatus } from '../services/VoiceAnnouncementMan
 
 export default function CurrencyPage() {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const viewfinderRef = useRef<HTMLDivElement>(null)
   const liveScanInProgressRef = useRef(false)
+  const [videoDimensions, setVideoDimensions] = useState({ width: 0, height: 0 })
+  const [scanGuideSize, setScanGuideSize] = useState<{ width: number; height: number } | null>(null)
   const [cameraActive, setCameraActive] = useState(false)
   const [isStarting, setIsStarting] = useState(false)
   const [telemetry, setTelemetry] = useState<CameraTelemetry>(getCameraTelemetry())
@@ -222,6 +225,31 @@ export default function CurrencyPage() {
 
     return () => clearInterval(interval)
   }, [isLiveScanning, cameraActive, isScanning, scanMode, executeSingleScan, executeMultiScan])
+
+  useEffect(() => {
+    const video = videoRef.current
+    const viewfinder = viewfinderRef.current
+    if (!cameraActive || !video || !viewfinder || videoDimensions.width <= 0 || videoDimensions.height <= 0) {
+      setScanGuideSize(null)
+      return
+    }
+
+    const updateGuideSize = () => {
+      const bounds = viewfinder.getBoundingClientRect()
+      const scale = Math.min(bounds.width / videoDimensions.width, bounds.height / videoDimensions.height)
+      const side = Math.round(Math.min(videoDimensions.width, videoDimensions.height) * 0.92 * scale)
+      setScanGuideSize({ width: side, height: side })
+    }
+
+    updateGuideSize()
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateGuideSize) : null
+    observer?.observe(viewfinder)
+    window.addEventListener('resize', updateGuideSize)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', updateGuideSize)
+    }
+  }, [cameraActive, videoDimensions])
 
   // Repeat scan (unfreeze and rescan)
   const handleRepeatScan = useCallback(() => {
@@ -456,33 +484,40 @@ export default function CurrencyPage() {
           {/* Camera Viewfinder & Controls */}
           <div className="lg:col-span-2">
             <div className="glass-card overflow-hidden">
-              <div className="relative bg-[#070b14] aspect-video rounded-xl overflow-hidden flex items-center justify-center">
+              <div ref={viewfinderRef} className="relative bg-[#070b14] aspect-video rounded-xl overflow-hidden flex items-center justify-center">
                 <video
                   ref={videoRef}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                   autoPlay
                   muted
                   playsInline
+                  onLoadedMetadata={() => {
+                    const video = videoRef.current
+                    if (video) setVideoDimensions({ width: video.videoWidth, height: video.videoHeight })
+                  }}
                 />
 
                 {/* Overlays */}
                 {cameraActive && (
                   <div className="absolute inset-0 pointer-events-none flex items-center justify-center p-4">
                     {scanMode === 'single' ? (
-                      /* True Banknote Aspect Ratio Guide (~2.25:1) */
-                      <div className="relative w-[85%] max-w-[480px] aspect-[2.25/1] border-2 border-cyan-400/80 rounded-xl bg-cyan-500/5 shadow-[0_0_35px_rgba(0,229,255,0.18)] flex flex-col justify-between p-3 transition-all">
+                      /* Center-square guide mirrors the exact model input crop. */
+                      <div
+                        style={scanGuideSize ? { width: scanGuideSize.width, height: scanGuideSize.height } : undefined}
+                        className="relative aspect-square max-w-[92%] max-h-[92%] border-2 border-cyan-400/80 rounded-xl bg-cyan-500/5 shadow-[0_0_35px_rgba(0,229,255,0.18)] flex flex-col justify-between p-3 transition-all"
+                      >
                         <div className="flex justify-between items-center text-[10px] uppercase font-mono tracking-wider text-cyan-300">
-                          <span>Hold 1 Note Flat</span>
-                          <span>₹10 - ₹2000</span>
+                          <span>Center 1 Note</span>
+                          <span>₹10–₹2000</span>
                         </div>
                         <div className="text-center">
                           <span className="text-[11px] font-medium text-white/90 bg-black/60 px-3 py-1 rounded-full border border-white/10 shadow-sm">
-                            Fit full banknote inside frame
+                            Keep the full note flat inside the square
                           </span>
                         </div>
                         <div className="flex justify-between text-[10px] text-cyan-400/80 font-mono">
-                          <span>[Front or Reverse]</span>
-                          <span>₹500 · ₹100 · ₹200 · ₹50</span>
+                          <span>Front or reverse</span>
+                          <span>Hold steady</span>
                         </div>
                       </div>
                     ) : (

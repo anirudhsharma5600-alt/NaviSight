@@ -449,6 +449,19 @@ export function getCurrencyDiagnostics(): CurrencyDiagnosticsData {
 
 // ─── STAGE A: Banknote Presence Detection ───
 
+function getCenteredCurrencyScanRegion(srcWidth: number, srcHeight: number): ImageRegion {
+  // Training uses square scenes with a landscape note and background. Keep the
+  // note's shape intact on portrait and landscape phones instead of stretching
+  // a wide horizontal stripe into the square classifier input.
+  const side = Math.max(1, Math.round(Math.min(srcWidth, srcHeight) * 0.92))
+  return {
+    x: Math.round((srcWidth - side) / 2),
+    y: Math.round((srcHeight - side) / 2),
+    width: side,
+    height: side,
+  }
+}
+
 export function detectBanknotePresence(
   videoOrCanvas: HTMLVideoElement | HTMLCanvasElement,
   region?: ImageRegion
@@ -481,10 +494,11 @@ export function detectBanknotePresence(
     sw = Math.max(10, Math.min(srcWidth - sx, region.width))
     sh = Math.max(10, Math.min(srcHeight - sy, region.height))
   } else {
-    sw = Math.round(srcWidth * 0.75)
-    sh = Math.round(srcHeight * 0.75)
-    sx = Math.round((srcWidth - sw) / 2)
-    sy = Math.round((srcHeight - sh) / 2)
+    const scanRegion = getCenteredCurrencyScanRegion(srcWidth, srcHeight)
+    sx = scanRegion.x
+    sy = scanRegion.y
+    sw = scanRegion.width
+    sh = scanRegion.height
   }
 
   ctx.drawImage(videoOrCanvas, sx, sy, sw, sh, 0, 0, 112, 112)
@@ -721,13 +735,11 @@ function extractTensorFromRegion(
     sw = Math.max(10, Math.min(srcWidth - sx, region.width))
     sh = Math.max(10, Math.min(srcHeight - sy, region.height))
   } else {
-    // Use the same 2.25:1 horizontal window as the banknote guide and training
-    // preprocessing. The former near-square mobile crop clipped the long ends
-    // of a note and stretched mostly background into the classifier input.
-    sw = Math.round(srcWidth * 0.88)
-    sh = Math.min(Math.round(sw / 2.25), Math.round(srcHeight * 0.88))
-    sx = Math.round((srcWidth - sw) / 2)
-    sy = Math.round((srcHeight - sh) / 2)
+    const scanRegion = getCenteredCurrencyScanRegion(srcWidth, srcHeight)
+    sx = scanRegion.x
+    sy = scanRegion.y
+    sw = scanRegion.width
+    sh = scanRegion.height
   }
 
   ctx.drawImage(videoOrCanvas, sx, sy, sw, sh, 0, 0, 224, 224)
@@ -1001,12 +1013,6 @@ export async function recognizeBanknote(
           : lang === 'pa'
           ? 'ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਸਮੇਂ ਵਿੱਚ ਇੱਕ ਹੀ ਨੋਟ ਸਕੈਨ ਕਰੋ।'
           : 'Please scan one note at a time.'
-    } else if (topMatch.cls === 'INR_100' && chromaticProfile.contrast < 30) {
-      // Under-contrast safeguard: reject severely washed-out captures
-      isConfident = false
-      state = 'LOW_CONFIDENCE'
-      uncertainReason = 'low_contrast'
-      spokenText = noBanknoteSpeech
     } else {
       // Verified High-Confidence Indian Banknote Recognition
       state = 'DENOMINATION_RECOGNISED'
