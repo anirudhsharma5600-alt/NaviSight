@@ -24,26 +24,31 @@ function createIntents(navigate: (path: string) => void): Intent[] {
   return [
     {
       name: 'greet',
-      patterns: [/\b(hello|hi|hey)\b/i],
+      patterns: [/\b(hello|hi|hey)\b/i, /\b(namaste|नमस्ते|हेलो|हाय)\b/i],
       handler: () =>
         "Hello! I'm Navi, your AI accessibility assistant. I can describe your surroundings, read text, and help you navigate. Say 'help' to learn more!",
     },
     {
       name: 'help',
-      patterns: [/\b(help|commands?|what can you|what do you)\b/i],
+      patterns: [/\b(help|commands?|what can you|what do you)\b/i, /\b(मदद|सहायता|क्या कर सकत)\b/i],
       handler: () =>
         "Here's what I can do: Say 'describe surroundings' to know what's around you. " +
         "Say 'what objects' to list detected objects. " +
         "Say 'start camera' or 'stop camera' to control the camera. " +
         "Say 'read text' to go to the OCR reader. " +
         "Say 'navigate' for directions. " +
+        "Say 'proximity alerts' for obstacle warnings. " +
+        "Say 'read currency' to identify banknotes. " +
+        "Say 'detect potholes' for road hazard alerts. " +
         "Say 'status' to check AI system status. " +
-        "Say 'stop' to silence me. Say 'repeat' to hear my last response.",
+        "Say 'stop' to silence me. Say 'repeat' to hear my last response. " +
+        "Hindi commands also work: 'kya hai aas paas', 'camera chalu karo', 'rasta dikhao'.",
     },
     {
       name: 'describe_surroundings',
       patterns: [
         /\b(describe|surroundings?|what.*see|what.*around|what.*front|scene|environment)\b/i,
+        /\b(kya hai|aas paas|samne kya|आस पास|सामने क्या|बताओ)\b/i,
       ],
       handler: () => {
         const detections = getLatestDetections()
@@ -79,7 +84,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'start_camera',
-      patterns: [/\b(start|open|turn on|enable).*camera\b/i],
+      patterns: [/\b(start|open|turn on|enable).*camera\b/i, /\b(camera chalu|कैमरा चालू|कैमरा खोलो)\b/i],
       handler: () => {
         naviEmit('camera:start')
         return "Starting the camera now. I'll begin detecting objects once the AI model is ready."
@@ -87,7 +92,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'stop_camera',
-      patterns: [/\b(stop|close|turn off|disable).*camera\b/i],
+      patterns: [/\b(stop|close|turn off|disable).*camera\b/i, /\b(camera band|कैमरा बंद)\b/i],
       handler: () => {
         naviEmit('camera:stop')
         return 'Camera stopped. Say "start camera" to turn it back on.'
@@ -95,7 +100,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'read_text',
-      patterns: [/\b(read|text|sign|ocr|scan|label)\b/i],
+      patterns: [/\b(read|text|sign|ocr|scan|label)\b/i, /\b(padho|पढ़ो|text padho)\b/i],
       handler: () => {
         navigate('/ocr')
         return "Opening the Smart OCR Reader. You can capture text from signs, labels, and documents there."
@@ -103,7 +108,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'proximity_alerts',
-      patterns: [/\b(proximity|distance|how close|beep|alarm)\b/i],
+      patterns: [/\b(proximity|distance|how close|beep|alarm)\b/i, /\b(kitni dur|कितनी दूर|नज़दीक|kareeb)\b/i],
       handler: () => {
         navigate('/proximity')
         return "Opening Proximity Alerts. You will hear dynamic audio beeps and vibration warnings as objects approach."
@@ -111,7 +116,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'currency_reader',
-      patterns: [/\b(currency|rupee|note|money|cash|banknote)\b/i],
+      patterns: [/\b(currency|rupee|note|money|cash|banknote)\b/i, /\b(paisa|पैसा|नोट|रुपया|kitne ka)\b/i],
       handler: () => {
         navigate('/currency')
         return "Opening Indian Currency Reader. Point your camera at a banknote to inspect its denomination."
@@ -119,7 +124,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'pothole_detection',
-      patterns: [/\b(pothole|potholes|road hazard|crack|road damage)\b/i],
+      patterns: [/\b(pothole|potholes|road hazard|crack|road damage)\b/i, /\b(gadda|गड्ढा|sadak|सड़क)\b/i],
       handler: () => {
         navigate('/pothole')
         return "Opening Road Hazard Detection. You can monitor the road ahead for potholes, cracks, and obstacles."
@@ -127,7 +132,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'navigate',
-      patterns: [/\b(navigate|direction|where|map|location|gps)\b/i],
+      patterns: [/\b(navigate|direction|where|map|location|gps)\b/i, /\b(rasta|रास्ता|kidhar|किधर|नक्शा|naksha)\b/i],
       handler: () => {
         navigate('/navigation')
         return "Opening the Navigation page. You can see your location and search for destinations there."
@@ -157,7 +162,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'stop',
-      patterns: [/\b(stop|quiet|silence|shut|hush|mute)\b/i],
+      patterns: [/\b(stop|quiet|silence|shut|hush|mute)\b/i, /\b(chup|बंद करो|रुको|bas)\b/i],
       handler: () => {
         stopSpeaking()
         return "Okay, I'll be quiet now."
@@ -177,7 +182,7 @@ function createIntents(navigate: (path: string) => void): Intent[] {
     },
     {
       name: 'thanks',
-      patterns: [/\b(thank|thanks|thank you)\b/i],
+      patterns: [/\b(thank|thanks|thank you)\b/i, /\b(shukriya|शुक्रिया|dhanyawad|धन्यवाद)\b/i],
       handler: () => "You're welcome! I'm always here to help.",
     },
     {
@@ -197,6 +202,7 @@ export default function VoiceAssistant() {
   const [history, setHistory] = useState<Array<{ user: string; navi: string; time: string }>>([])
   const recognitionRef = useRef<any>(null)
   const [detectionCount, setDetectionCount] = useState(0)
+  const [voiceLang, setVoiceLang] = useState<'en-US' | 'hi-IN'>('en-US')
 
   // Poll detection count for display
   useEffect(() => {
@@ -255,7 +261,7 @@ export default function VoiceAssistant() {
 
   const speakResponse = useCallback((text: string) => {
     setStatus('speaking')
-    speak(text)
+    speak(text, voiceLang)
     // Listen for speech end to reset status
     const checkInterval = setInterval(() => {
       if (!window.speechSynthesis?.speaking) {
@@ -263,7 +269,7 @@ export default function VoiceAssistant() {
         clearInterval(checkInterval)
       }
     }, 200)
-  }, [])
+  }, [voiceLang])
 
   const startListening = useCallback(() => {
     if (!SpeechRecognitionAPI) {
@@ -280,7 +286,7 @@ export default function VoiceAssistant() {
     const recognition = new SpeechRecognitionAPI()
     recognition.continuous = false
     recognition.interimResults = true
-    recognition.lang = 'en-US'
+    recognition.lang = voiceLang
 
     recognition.onstart = () => setStatus('listening')
 
@@ -327,7 +333,7 @@ export default function VoiceAssistant() {
 
     recognitionRef.current = recognition
     recognition.start()
-  }, [processCommand, speakResponse, status])
+  }, [processCommand, speakResponse, status, voiceLang])
 
   const stopEverything = () => {
     recognitionRef.current?.stop()
@@ -367,8 +373,31 @@ export default function VoiceAssistant() {
           </p>
         </motion.div>
 
-        {/* Live Detection Indicator */}
-        <div className="flex justify-center mb-6">
+        {/* Language Selection & Live Detection Indicator */}
+        <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
+          <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-full p-1 text-xs">
+            <button
+              onClick={() => setVoiceLang('en-US')}
+              className={`px-3 py-1 rounded-full font-medium transition-all ${
+                voiceLang === 'en-US'
+                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-400/30'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              English (US)
+            </button>
+            <button
+              onClick={() => setVoiceLang('hi-IN')}
+              className={`px-3 py-1 rounded-full font-medium transition-all ${
+                voiceLang === 'hi-IN'
+                  ? 'bg-purple-500/20 text-purple-400 border border-purple-400/30'
+                  : 'text-gray-400 hover:text-white'
+              }`}
+            >
+              हिन्दी (Hindi)
+            </button>
+          </div>
+
           <div className="glass-card px-4 py-2 flex items-center gap-3 text-xs">
             <div className="flex items-center gap-1.5">
               <Eye className="w-3.5 h-3.5 text-cyan-400" />
@@ -382,8 +411,8 @@ export default function VoiceAssistant() {
             <span className="text-gray-700">|</span>
             <span className="text-gray-500">
               Say{' '}
-              <span className="text-cyan-400">"describe surroundings"</span> to
-              use live AI
+              <span className="text-cyan-400">"describe surroundings"</span> or{' '}
+              <span className="text-purple-400">"आस पास क्या है"</span>
             </span>
           </div>
         </div>

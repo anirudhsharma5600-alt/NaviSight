@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom'
 import { lazy, Suspense } from 'react'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
+import BottomNav from './components/BottomNav'
 import LoadingScreen from './components/LoadingScreen'
 
 const Home = lazy(() => import('./pages/Home'))
@@ -17,7 +18,7 @@ const PotholePage = lazy(() => import('./pages/PotholePage'))
 
 function App() {
   return (
-    <div className="min-h-screen bg-navy-900 text-white">
+    <div className="min-h-screen bg-navy-900 text-white pb-16 md:pb-0">
       <Navbar />
       <Suspense fallback={<LoadingScreen />}>
         <Routes>
@@ -34,6 +35,7 @@ function App() {
         </Routes>
       </Suspense>
       <Footer />
+      <BottomNav />
     </div>
   )
 }

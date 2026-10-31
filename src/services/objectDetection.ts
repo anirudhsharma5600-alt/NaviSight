@@ -172,24 +172,90 @@ function calcPosition(bbox: number[], videoWidth: number): 'LEFT' | 'CENTRE' | '
   return 'CENTRE'
 }
 
+// ─── Performance Metrics ───
+
+let _lastFpsTime = 0
+let _frameCount = 0
+let _currentFps = 0
+let _lastInferenceMs = 0
+
+export function getPerformanceMetrics() {
+  return { fps: _currentFps, inferenceMs: _lastInferenceMs }
+}
+
+// ─── Off-screen canvas for frame resize (perf optimization) ───
+
+let _resizeCanvas: OffscreenCanvas | HTMLCanvasElement | null = null
+
+function getResizedFrame(video: HTMLVideoElement, maxDim: number): HTMLCanvasElement | OffscreenCanvas | HTMLVideoElement {
+  const vw = video.videoWidth
+  const vh = video.videoHeight
+  // Skip resize if already small enough
+  if (vw <= maxDim && vh <= maxDim) return video
+
+  const scale = Math.min(maxDim / vw, maxDim / vh)
+  const tw = Math.round(vw * scale)
+  const th = Math.round(vh * scale)
+
+  if (!_resizeCanvas) {
+    _resizeCanvas = typeof OffscreenCanvas !== 'undefined'
+      ? new OffscreenCanvas(tw, th)
+      : document.createElement('canvas')
+  }
+  _resizeCanvas.width = tw
+  _resizeCanvas.height = th
+
+  const ctx = _resizeCanvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
+  if (!ctx) return video
+  ctx.drawImage(video, 0, 0, tw, th)
+  return _resizeCanvas as HTMLCanvasElement
+}
+
 // ─── Main Detection Function ───
 
 export async function detectObjects(
-  video: HTMLVideoElement
+  video: HTMLVideoElement,
+  options?: { resizeMaxDim?: number }
 ): Promise<Detection[]> {
   if (!model) {
     await loadModel()
     if (!model) return []
   }
 
-  const predictions = await model.detect(video, config.maxDetections, config.confidenceThreshold)
+  const maxDim = options?.resizeMaxDim ?? 640
+  const inputFrame = getResizedFrame(video, maxDim) as HTMLCanvasElement | HTMLVideoElement
+
+  const start = performance.now()
+  const predictions = await model.detect(inputFrame, config.maxDetections, config.confidenceThreshold)
+  _lastInferenceMs = Math.round(performance.now() - start)
+
+  // FPS tracking
+  _frameCount++
+  const now = performance.now()
+  if (now - _lastFpsTime >= 1000) {
+    _currentFps = _frameCount
+    _frameCount = 0
+    _lastFpsTime = now
+  }
+
+  // Scale bounding boxes back to original video dimensions if we resized
+  const scaleX = inputFrame === video ? 1 : video.videoWidth / (inputFrame as HTMLCanvasElement).width
+  const scaleY = inputFrame === video ? 1 : video.videoHeight / (inputFrame as HTMLCanvasElement).height
   const videoWidth = video.videoWidth
 
   let detections: Detection[] = predictions.map(p => ({
     class: p.class,
     score: p.score,
-    bbox: p.bbox as [number, number, number, number],
-    position: calcPosition(p.bbox, videoWidth),
+    bbox: [
+      p.bbox[0] * scaleX,
+      p.bbox[1] * scaleY,
+      p.bbox[2] * scaleX,
+      p.bbox[3] * scaleY,
+    ] as [number, number, number, number],
+    position: calcPosition(
+      [p.bbox[0] * scaleX, p.bbox[1] * scaleY, p.bbox[2] * scaleX, p.bbox[3] * scaleY],
+      videoWidth
+    ),
     id: 0,
   }))
 
@@ -221,3 +287,16 @@ export const COCO_CLASSES = [
   'refrigerator', 'book', 'clock', 'vase', 'scissors', 'teddy bear',
   'hair drier', 'toothbrush',
 ]
+
+// ─── Cleanup ───
+
+export function cleanup(): void {
+  model?.dispose()
+  model = null
+  previousDetections = []
+  nextId = 1
+  _resizeCanvas = null
+  _frameCount = 0
+  _currentFps = 0
+  setStatus('idle')
+}
