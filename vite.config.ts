@@ -8,6 +8,10 @@ export default defineConfig({
       '@': '/src',
     },
   },
+  server: {
+    host: true,
+    allowedHosts: true,
+  },
   build: {
     chunkSizeWarningLimit: 2500,
   },

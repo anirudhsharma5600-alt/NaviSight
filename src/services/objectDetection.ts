@@ -23,7 +23,7 @@ export type ModelStatus = 'idle' | 'loading' | 'ready' | 'error'
 // ─── Defaults ───
 
 const DEFAULT_CONFIG: DetectionConfig = {
-  confidenceThreshold: 0.45,
+  confidenceThreshold: 0.55,
   maxDetections: 15,
   iouThreshold: 0.5,
   enableTracking: true,
@@ -36,6 +36,7 @@ let modelStatus: ModelStatus = 'idle'
 let config: DetectionConfig = { ...DEFAULT_CONFIG }
 let nextId = 1
 let previousDetections: Detection[] = []
+let modelLoadPromise: Promise<void> | null = null
 
 // ─── Listeners ───
 
@@ -66,16 +67,24 @@ export function updateConfig(partial: Partial<DetectionConfig>): void {
 
 export async function loadModel(): Promise<void> {
   if (model) return
-  if (modelStatus === 'loading') return
+  if (modelLoadPromise) return modelLoadPromise
 
   setStatus('loading')
+  modelLoadPromise = (async () => {
+    try {
+      model = await cocoSsd.load({ base: 'lite_mobilenet_v2' })
+      setStatus('ready')
+    } catch (err) {
+      console.error('[ObjectDetection] Model load failed:', err)
+      setStatus('error')
+      throw err
+    }
+  })()
+
   try {
-    model = await cocoSsd.load({ base: 'lite_mobilenet_v2' })
-    setStatus('ready')
-  } catch (err) {
-    console.error('[ObjectDetection] Model load failed:', err)
-    setStatus('error')
-    throw err
+    await modelLoadPromise
+  } finally {
+    modelLoadPromise = null
   }
 }
 
@@ -293,6 +302,7 @@ export const COCO_CLASSES = [
 export function cleanup(): void {
   model?.dispose()
   model = null
+  modelLoadPromise = null
   previousDetections = []
   nextId = 1
   _resizeCanvas = null

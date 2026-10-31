@@ -15,6 +15,7 @@ export type ProximityZone = 'NEAR' | 'MEDIUM' | 'FAR'
 export type ApproachDirection = 'APPROACHING' | 'STABLE' | 'RECEDING'
 
 export interface ProximityAlert {
+  objectId: number
   objectClass: string
   zone: ProximityZone
   direction: ApproachDirection
@@ -34,6 +35,7 @@ export interface ProximityConfig {
   voiceEnabled: boolean
   volume: number
   sensitivity: 'low' | 'medium' | 'high'
+  language: 'en' | 'hi'
   cooldownMs: {
     critical: number
     danger: number
@@ -52,10 +54,11 @@ let config: ProximityConfig = {
   voiceEnabled: true,
   volume: 0.65,
   sensitivity: 'medium',
+  language: 'en',
   cooldownMs: {
-    critical: 650,
-    danger: 1200,
-    warning: 2500,
+    critical: 7000,
+    danger: 9000,
+    warning: 15000,
   },
 }
 
@@ -63,15 +66,21 @@ let config: ProximityConfig = {
 const sizeHistory: Map<string, number[]> = new Map()
 // Persistence counter: key -> consecutive frame detections
 const persistenceCount: Map<string, number> = new Map()
-// Last beep timestamp per alert level
+const lastTrackState: Map<string, ProximityState> = new Map()
+// One short urgent sound at a state change, with a global safety cooldown.
 let lastBeepTime = 0
 let lastVoiceAlertTime = 0
 let currentState: ProximityState = 'CLEAR'
 
 // BLE hardware integration
 let sensorDistance: number | null = null
+let sensorDistanceAt = 0
 let bleConnected = false
 let bleDevice: any = null
+let bleCharacteristic: any = null
+
+const SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'
+const DISTANCE_CHARACTERISTIC_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb'
 
 // ─── Sensitivity Thresholds ───
 
@@ -236,14 +245,18 @@ export function processDetectionsForProximity(
   const alerts: ProximityAlert[] = []
 
   let highestPersonAlert: ProximityAlert | null = null
+  let strongestNewlyUrgentAlert: ProximityAlert | null = null
 
   for (const det of detections) {
+    if (det.score < 0.55) continue
     const isPerson = det.class.toLowerCase() === 'person'
     const [, , w, h] = det.bbox
     const area = (w * h) / frameArea
     const heightRatio = h / frameHeight
 
-    const key = `${det.class}-${det.position}`
+    // Use the tracked object ID so two people in the same part of the frame
+    // keep independent distance trends and never merge into one target.
+    const key = `${det.id}`
     activeKeys.add(key)
 
     // Increment persistence count
@@ -260,10 +273,11 @@ export function processDetectionsForProximity(
 
     // Determine direction trend
     let direction: ApproachDirection = 'STABLE'
-    if (history.length >= 3) {
+    if (history.length >= 4) {
       const recentDiff = history[history.length - 1] - history[0]
-      if (recentDiff > 0.018) direction = 'APPROACHING'
-      else if (recentDiff < -0.018) direction = 'RECEDING'
+      const trendThreshold = Math.max(0.012, history[0] * 0.18)
+      if (recentDiff > trendThreshold) direction = 'APPROACHING'
+      else if (recentDiff < -trendThreshold) direction = 'RECEDING'
     }
 
     const { state, zone, level } = evaluatePersonState(
@@ -276,6 +290,7 @@ export function processDetectionsForProximity(
     const closenessScore = Math.min(100, Math.round((smoothedArea * 0.5 + heightRatio * 0.5) * 100))
 
     const alert: ProximityAlert = {
+      objectId: det.id,
       objectClass: det.class,
       zone,
       direction,
@@ -295,6 +310,24 @@ export function processDetectionsForProximity(
     if (isPerson && (!highestPersonAlert || closenessScore > highestPersonAlert.closenessScore)) {
       highestPersonAlert = alert
     }
+
+    const isStableDetection = count >= 3
+    const actionable = isStableDetection && (
+      (isPerson && (state === 'PERSON_APPROACHING' || state === 'PERSON_APPEARS_CLOSE')) ||
+      (!isPerson && zone === 'NEAR' && direction === 'APPROACHING')
+    )
+    if (isStableDetection) {
+      const trackState = isPerson ? state : actionable ? 'PERSON_APPROACHING' : 'CLEAR'
+      const previousTrackState = lastTrackState.get(key)
+      if (
+        actionable &&
+        previousTrackState !== trackState &&
+        (!strongestNewlyUrgentAlert || closenessScore > strongestNewlyUrgentAlert.closenessScore)
+      ) {
+        strongestNewlyUrgentAlert = alert
+      }
+      lastTrackState.set(key, trackState)
+    }
   }
 
   // Cleanup lost targets from history
@@ -302,36 +335,40 @@ export function processDetectionsForProximity(
     if (!activeKeys.has(key)) {
       sizeHistory.delete(key)
       persistenceCount.delete(key)
+      lastTrackState.delete(key)
     }
   }
 
-  // Update global state machine
-  if (highestPersonAlert) {
-    currentState = highestPersonAlert.state
-    const level = highestPersonAlert.level
-    const requiredCooldown = config.cooldownMs[level === 'CRITICAL' ? 'critical' : level === 'DANGER' ? 'danger' : 'warning']
+  currentState = highestPersonAlert?.state || 'CLEAR'
 
-    // Trigger Beep & Haptics with debounced cooldown
+  // Speak only when an independently tracked target enters an actionable
+  // state. Keep one voice alert and at most one urgent beep per cooldown.
+  if (strongestNewlyUrgentAlert) {
+    const enteredUrgentState = true
+    const position = config.language === 'hi'
+      ? strongestNewlyUrgentAlert.position === 'LEFT' ? 'आपके बाईं ओर' : strongestNewlyUrgentAlert.position === 'RIGHT' ? 'आपके दाईं ओर' : 'सामने'
+      : strongestNewlyUrgentAlert.position === 'LEFT' ? 'on your left' : strongestNewlyUrgentAlert.position === 'RIGHT' ? 'on your right' : 'ahead'
+    const objectName = strongestNewlyUrgentAlert.isPerson
+      ? (config.language === 'hi' ? 'एक व्यक्ति' : 'A person')
+      : (config.language === 'hi' ? strongestNewlyUrgentAlert.objectClass : `A ${strongestNewlyUrgentAlert.objectClass}`)
+    const message = config.language === 'hi'
+      ? `${position} ${objectName} ${strongestNewlyUrgentAlert.state === 'PERSON_APPEARS_CLOSE' ? 'बहुत पास' : 'करीब आता हुआ'} दिखाई दे रहा है।`
+      : `${objectName} ${position} ${strongestNewlyUrgentAlert.state === 'PERSON_APPEARS_CLOSE' ? 'appears very close' : 'appears to be getting closer'}.`
+
+    if (enteredUrgentState && config.voiceEnabled && now - lastVoiceAlertTime >= 6000) {
+      lastVoiceAlertTime = now
+      speak(message, config.language === 'hi' ? 'hi-IN' : 'en-US')
+    }
+
     if (
-      (highestPersonAlert.state === 'PERSON_APPEARS_CLOSE' || highestPersonAlert.state === 'PERSON_APPROACHING') &&
-      now - lastBeepTime >= requiredCooldown
+      strongestNewlyUrgentAlert.zone === 'NEAR' &&
+      enteredUrgentState &&
+      now - lastBeepTime >= config.cooldownMs.critical
     ) {
       lastBeepTime = now
-      playAlertPattern(level)
-      triggerVibration(level)
+      playAlertPattern('CRITICAL')
+      triggerVibration('CRITICAL')
     }
-
-    // Voice announcement with longer cooldown (4.5s) to avoid overlapping
-    if (
-      config.voiceEnabled &&
-      highestPersonAlert.state === 'PERSON_APPEARS_CLOSE' &&
-      now - lastVoiceAlertTime >= 4500
-    ) {
-      lastVoiceAlertTime = now
-      speak('Warning! A person appears very close.')
-    }
-  } else {
-    currentState = 'CLEAR'
   }
 
   return alerts.sort((a, b) => b.closenessScore - a.closenessScore)
@@ -377,6 +414,7 @@ export function updateProximityConfig(partial: Partial<ProximityConfig>): void {
 export function initProximityEngine(): void {
   sizeHistory.clear()
   persistenceCount.clear()
+  lastTrackState.clear()
   lastBeepTime = 0
   lastVoiceAlertTime = 0
   currentState = 'CLEAR'
@@ -397,32 +435,67 @@ export function isBLESensorConnected(): boolean {
 }
 
 export function getSensorDistance(): number | null {
-  return sensorDistance
+  return Date.now() - sensorDistanceAt <= 3000 ? sensorDistance : null
 }
 
 export async function connectBLESensor(): Promise<boolean> {
   if (!isBLESupported()) return false
   try {
     const device = await (navigator as any).bluetooth.requestDevice({
-      filters: [{ services: ['0000ffe0-0000-1000-8000-00805f9b34fb'] }],
-      optionalServices: ['battery_service'],
+      filters: [{ services: [SERVICE_UUID] }],
+      optionalServices: [SERVICE_UUID],
     })
     const server = await device.gatt.connect()
+    const service = await server.getPrimaryService(SERVICE_UUID)
+    const characteristic = await service.getCharacteristic(DISTANCE_CHARACTERISTIC_UUID)
+    if (typeof characteristic.startNotifications !== 'function') {
+      throw new Error('The distance characteristic does not support BLE notifications.')
+    }
+    await characteristic.startNotifications()
+    characteristic.addEventListener('characteristicvaluechanged', (event: any) => {
+      const value = event.target?.value as DataView | undefined
+      if (!value) return
+      const payload = new TextDecoder().decode(new Uint8Array(value.buffer, value.byteOffset, value.byteLength)).trim()
+      const match = /^NAVIAI\s*[:,]\s*(\d+(?:\.\d+)?)\s*$/i.exec(payload)
+      const centimeters = match ? Number(match[1]) : NaN
+      if (Number.isFinite(centimeters) && centimeters > 0 && centimeters <= 1000) {
+        sensorDistance = centimeters
+        sensorDistanceAt = Date.now()
+      }
+    })
+
     bleDevice = device
+    bleCharacteristic = characteristic
     bleConnected = true
+    device.addEventListener('gattserverdisconnected', () => {
+      bleConnected = false
+      bleCharacteristic = null
+      sensorDistance = null
+      sensorDistanceAt = 0
+    })
     return true
   } catch (err) {
     console.warn('[BLE] Sensor connection error:', err)
     bleConnected = false
+    bleCharacteristic = null
+    sensorDistance = null
+    sensorDistanceAt = 0
     return false
   }
 }
 
 export function disconnectBLESensor(): void {
+  try {
+    bleCharacteristic?.stopNotifications?.()
+  } catch {
+    /* Ignore devices that have already disconnected. */
+  }
   if (bleDevice && bleDevice.gatt?.connected) {
     bleDevice.gatt.disconnect()
   }
   bleDevice = null
+  bleCharacteristic = null
   bleConnected = false
   sensorDistance = null
+  sensorDistanceAt = 0
 }

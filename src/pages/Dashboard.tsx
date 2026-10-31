@@ -12,15 +12,17 @@ import {
 } from '../services/objectDetection'
 import { speak, stopSpeaking } from '../services/speechService'
 import TestLog from '../integration/TestLog'
-import {
-  generateSceneDescription, generateNewDetectionAnnouncements,
-  resetAnnouncementCooldowns,
-} from '../services/contextEngine'
 import { setCameraStatus } from '../services/modelManager'
 import { naviOn, setLatestDetections } from '../services/naviEventBus'
 import {
-  processDetectionsForProximity, unlockAudioContext,
+  connectBLESensor, disconnectBLESensor, getSensorDistance, isBLESupported,
+  isBLESensorConnected, processDetectionsForProximity, setAlertsEnabled,
+  setVoiceAlertsEnabled, unlockAudioContext, updateProximityConfig,
 } from '../services/proximityEngine'
+import {
+  analyzeSceneObjects, describeScene, getScanRegion, keepDetectionsInScanArea,
+  resetSceneAnalysis, type ScanAreaMode, type SceneObject, type SpeechLanguage,
+} from '../services/sceneAnalysis'
 
 // ─── Helper for readyState text ───
 function getReadyStateDescription(state: number): string {
@@ -50,7 +52,13 @@ export default function Dashboard() {
   const [selectedCameraId, setSelectedCameraId] = useState<string>('')
   const [modelStatus, setModelStatus] = useState<ModelStatus>('idle')
   const [detections, setDetections] = useState<Detection[]>([])
+  const [sceneObjects, setSceneObjects] = useState<SceneObject[]>([])
+  const [scanAreaMode, setScanAreaMode] = useState<ScanAreaMode>('focused')
+  const [speechLanguage, setSpeechLanguage] = useState<SpeechLanguage>('hi')
   const [audioEnabled, setAudioEnabled] = useState(true)
+  const [sensorConnected, setSensorConnected] = useState(isBLESensorConnected())
+  const [sensorDistance, setSensorDistance] = useState<number | null>(getSensorDistance())
+  const [sensorConnecting, setSensorConnecting] = useState(false)
   const [fps, setFps] = useState(0)
   const [inferenceMs, setInferenceMs] = useState(0)
   const [isDetecting, setIsDetecting] = useState(false)
