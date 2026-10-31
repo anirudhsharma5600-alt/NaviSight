@@ -17,6 +17,9 @@ import {
 } from '../services/contextEngine'
 import { setCameraStatus } from '../services/modelManager'
 import { naviOn, setLatestDetections } from '../services/naviEventBus'
+import {
+  processDetectionsForProximity, unlockAudioContext,
+} from '../services/proximityEngine'
 
 // ─── Helper for readyState text ───
 function getReadyStateDescription(state: number): string {
@@ -195,6 +198,11 @@ export default function Dashboard() {
         setInferenceMs(Math.round(elapsed))
         setFps(Math.round(1000 / Math.max(elapsed, 1)))
 
+        // Proximity detection & Warning Beep for close persons / obstacles
+        if (audioEnabled && results.length > 0) {
+          processDetectionsForProximity(results, video.videoWidth, video.videoHeight)
+        }
+
         // Auto-announce new detections
         if (audioEnabled && results.length > 0) {
           const announcements = generateNewDetectionAnnouncements(results)
@@ -240,6 +248,7 @@ export default function Dashboard() {
     isStartingRef.current = true
     setIsStartingCamera(true)
     setCameraError('')
+    unlockAudioContext() // Unlock Web Audio API on explicit user interaction
 
     setDebugInfo(prev => ({
       ...prev,
@@ -247,9 +256,32 @@ export default function Dashboard() {
       errorMessage: '',
     }))
 
+    // Check whether window is in a secure context (HTTPS / localhost required for mobile cameras)
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      const isLocalhost =
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1' ||
+        window.location.hostname === '::1'
+
+      if (!isLocalhost) {
+        const msg =
+          'Camera blocked: Insecure Context. Mobile browsers (Chrome Android & Safari iOS) require HTTPS when accessed via network IP address. Access via localhost or deploy to HTTPS.'
+        console.error('[Camera]', msg)
+        setCameraError(msg)
+        setDebugInfo(prev => ({
+          ...prev,
+          streamStatus: 'error',
+          errorMessage: msg,
+        }))
+        isStartingRef.current = false
+        setIsStartingCamera(false)
+        return
+      }
+    }
+
     // A. Check whether navigator.mediaDevices and getUserMedia are available
     if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      const msg = 'navigator.mediaDevices.getUserMedia is not available. Ensure you are running on localhost or HTTPS.'
+      const msg = 'navigator.mediaDevices.getUserMedia is not available on this browser or platform.'
       console.error('[Camera]', msg)
       setCameraError(msg)
       setDebugInfo(prev => ({
@@ -273,12 +305,12 @@ export default function Dashboard() {
     let stream: MediaStream | null = null
     let lastError: any = null
 
-    // A. Request camera access using { video: { facingMode: "environment" }, audio: false }
+    // A. Request camera access using { video: { facingMode: { ideal: "environment" } }, audio: false }
     // Or target deviceId if specified
     try {
       const primaryConstraints: MediaStreamConstraints = deviceToUse
         ? { video: { deviceId: { exact: deviceToUse } }, audio: false }
-        : { video: { facingMode: 'environment' }, audio: false }
+        : { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false }
 
       console.log('[Camera] Requesting camera with primary constraints:', primaryConstraints)
       stream = await navigator.mediaDevices.getUserMedia(primaryConstraints)
@@ -352,6 +384,8 @@ export default function Dashboard() {
     video.defaultMuted = true
     video.playsInline = true
     video.autoplay = true
+    video.setAttribute('playsinline', 'true')
+    video.setAttribute('webkit-playsinline', 'true')
 
     // Wait for loadedmetadata before considering the video ready
     await new Promise<void>((resolve) => {

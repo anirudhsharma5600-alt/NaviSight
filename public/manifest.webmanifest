@@ -1,0 +1,16 @@
+{
+  "name": "NaviAble AI — Beyond Vision. Beyond Limits.",
+  "short_name": "NaviAble AI",
+  "description": "AI-powered assistive technology for visually impaired users. Real-time object detection, voice interaction, and smart navigation.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "categories": ["accessibility", "utilities", "health"],
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

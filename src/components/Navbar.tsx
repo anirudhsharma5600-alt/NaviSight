@@ -4,12 +4,15 @@ import { Menu, X, Eye } from 'lucide-react'
 
 const navLinks = [
   { name: 'Home', path: '/' },
-  { name: 'About', path: '/about' },
-  { name: 'Features', path: '/#features' },
   { name: 'Live Demo', path: '/dashboard' },
-  { name: 'Voice Assistant', path: '/voice' },
+  { name: 'Proximity', path: '/proximity' },
+  { name: 'Currency', path: '/currency' },
+  { name: 'Road Hazards', path: '/pothole' },
+  { name: 'Voice', path: '/voice' },
+  { name: 'OCR', path: '/ocr' },
   { name: 'Navigation', path: '/navigation' },
   { name: 'AI Status', path: '/status' },
+  { name: 'About', path: '/about' },
 ]
 
 export default function Navbar() {

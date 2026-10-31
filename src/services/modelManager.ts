@@ -1,17 +1,21 @@
 import { getModelStatus, loadModel, type ModelStatus } from './objectDetection'
 import { isSpeechSynthesisSupported, isSpeechRecognitionSupported } from './speechService'
+import { getCurrencyModelStatus, type CurrencyModelStatus } from './currencyDetection'
+import { getPotholeModelStatus, type PotholeModelStatus } from './potholeDetection'
 
 // ─── Types ───
 
 export interface AIServiceStatus {
   objectDetection: ModelStatus
+  proximityEngine: 'ready' | 'idle'
+  currencyRecognition: CurrencyModelStatus
+  roadIntelligence: PotholeModelStatus
   ocrEngine: 'idle' | 'ready' | 'loading' | 'error'
   camera: 'active' | 'inactive'
   microphone: 'active' | 'inactive'
   voiceRecognition: 'available' | 'unsupported'
   textToSpeech: 'available' | 'unsupported'
   wakeWord: 'disabled'
-  roadIntelligence: 'not_installed'
   soundIntelligence: 'not_installed'
 }
 
@@ -20,6 +24,7 @@ export interface AIServiceStatus {
 let cameraStatus: 'active' | 'inactive' = 'inactive'
 let microphoneStatus: 'active' | 'inactive' = 'inactive'
 let ocrStatus: 'idle' | 'ready' | 'loading' | 'error' = 'idle'
+let proximityStatus: 'ready' | 'idle' = 'ready'
 
 type StatusChangeListener = (status: AIServiceStatus) => void
 const listeners: Set<StatusChangeListener> = new Set()
@@ -51,16 +56,23 @@ export function setOCRStatus(s: 'idle' | 'ready' | 'loading' | 'error') {
   notifyListeners()
 }
 
+export function setProximityStatus(s: 'ready' | 'idle') {
+  proximityStatus = s
+  notifyListeners()
+}
+
 export function getFullStatus(): AIServiceStatus {
   return {
     objectDetection: getModelStatus(),
+    proximityEngine: proximityStatus,
+    currencyRecognition: getCurrencyModelStatus(),
+    roadIntelligence: getPotholeModelStatus(),
     ocrEngine: ocrStatus,
     camera: cameraStatus,
     microphone: microphoneStatus,
     voiceRecognition: isSpeechRecognitionSupported() ? 'available' : 'unsupported',
     textToSpeech: isSpeechSynthesisSupported() ? 'available' : 'unsupported',
     wakeWord: 'disabled',
-    roadIntelligence: 'not_installed',
     soundIntelligence: 'not_installed',
   }
 }
@@ -75,4 +87,3 @@ export async function initializeAI(): Promise<void> {
   }
   notifyListeners()
 }
-
