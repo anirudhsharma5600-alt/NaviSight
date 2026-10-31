@@ -153,3 +153,4 @@ Real-time hardware and AI telemetry panel showing all 11 required parameters:
    Under severe illumination deficits (chromatic contrast < 35), the system prudently rejects inference with: *"Sorry, I cannot recognise this note clearly. Please scan again."* Users should ensure ambient room lighting or activate device flashlight when available.
 3. **Mobile Browser Audio Policy:**
    iOS Safari and Android Chrome require an initial user tap on the screen before the browser will emit synthetic speech. The "Enable / Test Voice" button or tapping "Scan Note" satisfies this OS constraint.
+
