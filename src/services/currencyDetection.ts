@@ -567,9 +567,12 @@ export function detectBanknotePresence(
     }
   }
 
-  // 3. REJECT DIGITAL DISPLAYS / WEBSITES / SCREENS (Cool white / high blue backlighting with low saturation)
-  // Computer screens displaying white web pages or documents typically exhibit sRGB 6500K cool white (avgB >= avgR + 4) with near-zero saturation.
-  if (avgLuma > 120 && saturation < 0.12 && (avgB >= avgR + 2 || maxChannelDiff < 16)) {
+  // 3. REJECT DIGITAL DISPLAYS / WEBSITES / SCREENS (Near zero saturation neutral gray or pure cold-white sRGB)
+  // Computer monitors displaying white web pages or documents exhibit near-zero saturation (< 0.055) with maxChannelDiff < 14,
+  // or strong sRGB cold-white blue cast (avgB >= avgR + 10 with saturation < 0.06).
+  // Authentic Lavender ₹100 banknotes have saturation 0.08 - 0.15 and maxChannelDiff >= 14, avoiding false rejection.
+  if ((avgLuma > 110 && saturation < 0.055 && maxChannelDiff < 14) ||
+      (avgLuma > 150 && saturation < 0.06 && avgB >= avgR + 10)) {
     return {
       hasBanknotePresence: false,
       presenceConfidence: 0.05,
@@ -580,7 +583,8 @@ export function detectBanknotePresence(
   }
 
   // 4. REJECT PLAIN DOCUMENTS, BOOKS, RECEIPTS & PRINTS (High brightness, low saturation, high text edge density)
-  if (brightRatio > 0.50 || (avgLuma > 175 && saturation < 0.14)) {
+  // Standard receipt paper is monochrome white/gray with saturation < 0.05 and maxChannelDiff < 10.
+  if (brightRatio > 0.65 || (avgLuma > 195 && saturation < 0.05 && maxChannelDiff < 10)) {
     return {
       hasBanknotePresence: false,
       presenceConfidence: 0.06,
@@ -591,7 +595,7 @@ export function detectBanknotePresence(
   }
 
   // 5. REJECT SOLID FEATURELESS WALLS OR DESK TOPS
-  if (contrast < 32 && hGrad < 1.3 && vGrad < 1.3) {
+  if (contrast < 30 && hGrad < 1.1 && vGrad < 1.1) {
     return {
       hasBanknotePresence: false,
       presenceConfidence: 0.04,
@@ -602,50 +606,59 @@ export function detectBanknotePresence(
   }
 
   // 6. POSITIVE CHROMATIC SPECTRUM VERIFICATION FOR INDIAN BANKNOTES
-  // Genuine banknotes have specific pigmented dyes with minimum saturation >= 0.14
+  // Genuine banknotes have specific pigmented dyes with calibrated chromatic profiles
   let hasValidBanknoteColor = false
   let presenceScore = 0.0
   let matchedColorTheme = 'Unknown'
 
-  // ₹10: Chocolate Brown (Warm brown: R > G > B, saturation >= 0.18)
-  if (avgR > 90 && avgG > 55 && avgB < 95 && avgR > avgG + 15 && avgG > avgB && saturation >= 0.18) {
-    hasValidBanknoteColor = true
-    presenceScore = 0.88
-    matchedColorTheme = 'Chocolate Brown (₹10)'
-  }
-  // ₹20: Greenish Yellow (G > B, warm yellow-green: saturation >= 0.16)
-  else if (avgG > 105 && avgR > 85 && avgB < 100 && avgG >= avgR * 0.85 && saturation >= 0.16) {
-    hasValidBanknoteColor = true
-    presenceScore = 0.88
-    matchedColorTheme = 'Greenish Yellow (₹20)'
-  }
-  // ₹50: Fluorescent Blue (Cyan-blue: B > R + 15, saturation >= 0.18)
-  else if (avgB > 105 && avgB > avgR + 15 && saturation >= 0.18) {
-    hasValidBanknoteColor = true
-    presenceScore = 0.90
-    matchedColorTheme = 'Fluorescent Blue (₹50)'
-  }
-  // ₹100: Lavender (Distinct violet/purple: B > G + 6 AND R > G + 6, with genuine saturation >= 0.14)
-  // Strictly rejects neutral gray/silver laptops where R ≈ G ≈ B!
-  else if (avgB > 95 && avgR > 85 && avgB > avgG + 6 && avgR > avgG + 4 && saturation >= 0.14) {
-    hasValidBanknoteColor = true
-    presenceScore = 0.86
-    matchedColorTheme = 'Lavender (₹100)'
-  }
-  // ₹200: Bright Yellow-Orange (Strong warm orange: R > 125, G > 95, B < 95, saturation >= 0.24)
-  else if (avgR > 125 && avgG > 95 && avgB < 95 && avgR > avgB + 35 && saturation >= 0.24) {
+  // ₹200: Bright Yellow-Orange (Orange: R > G + 25, R > B + 55, saturation >= 0.20)
+  if (avgR > 125 && avgG > 95 && avgR > avgG + 25 && avgR > avgB + 55 && saturation >= 0.20) {
     hasValidBanknoteColor = true
     presenceScore = 0.92
     matchedColorTheme = 'Bright Yellow-Orange (₹200)'
   }
-  // ₹500: Stone Grey / Olive Green (Subtle olive green dye: G >= R and G >= B, luma 80-190, moderate texture)
-  else if (avgG >= avgR - 5 && avgG >= avgB - 5 && avgLuma > 80 && avgLuma < 190 && hGrad > 1.2 && vGrad > 1.2 && saturation >= 0.10) {
+  // ₹20: Greenish Yellow (High luma > 185, R & G both high with G >= R - 15, maxChannelDiff >= 40)
+  else if (avgG > 100 && avgR > 100 && avgLuma > 185 && avgG >= avgR - 15 && avgR > avgB + 35 && saturation >= 0.14) {
     hasValidBanknoteColor = true
-    presenceScore = 0.85
-    matchedColorTheme = 'Stone Grey (₹500)'
+    presenceScore = 0.88
+    matchedColorTheme = 'Greenish Yellow (₹20)'
   }
-  // ₹2000: Magenta (Deep magenta: R > 120, B > 90, G < 105, saturation >= 0.20)
-  else if (avgR > 120 && avgB > 90 && avgG < 105 && (avgR - avgG) > 20 && saturation >= 0.20) {
+  // ₹10: Chocolate Brown (Warm brown: R > G > B, saturation >= 0.15)
+  else if (avgR > 90 && avgG > 55 && avgR > avgG + 15 && avgG > avgB && saturation >= 0.15) {
+    hasValidBanknoteColor = true
+    presenceScore = 0.88
+    matchedColorTheme = 'Chocolate Brown (₹10)'
+  }
+  // ₹50: Fluorescent Blue (Cyan-blue: G > R and B > R + 10, saturation >= 0.12)
+  else if (avgB > 105 && avgB > avgR + 10 && avgG > avgR + 5 && saturation >= 0.12) {
+    hasValidBanknoteColor = true
+    presenceScore = 0.90
+    matchedColorTheme = 'Fluorescent Blue (₹50)'
+  }
+  // ₹100: Lavender (Modern: avgB > 95, avgB > avgG + 3, maxChannelDiff >= 12, sat >= 0.07)
+  // Also supports Legacy ₹100 Blue-Green / Blue-Violet series
+  else if (
+    (avgB > 95 && avgB > avgG + 3 && saturation >= 0.07 && maxChannelDiff >= 12) ||
+    (avgR > 190 && avgG > 190 && avgB > 180 && saturation < 0.08 && hGrad > 1.2 && vGrad > 1.2)
+  ) {
+    hasValidBanknoteColor = true
+    presenceScore = 0.88
+    matchedColorTheme = 'Lavender (₹100)'
+  }
+  // ₹500: Stone Grey (Modern: avgG >= avgR - 12 && avgG >= avgB + 8) OR Legacy / Warm Lighting Olive (avgR >= avgG && avgR > avgB + 18 && avgG > avgB + 8)
+  else if (
+    ((avgG >= avgR - 12 && avgG >= avgB + 8) || (avgR >= avgG && avgR > avgB + 18 && avgG > avgB + 8)) &&
+    avgLuma > 70 && avgLuma < 210 &&
+    hGrad > 1.1 && vGrad > 1.1 &&
+    saturation >= 0.08 &&
+    maxChannelDiff >= 14
+  ) {
+    hasValidBanknoteColor = true
+    presenceScore = 0.88
+    matchedColorTheme = 'Stone Grey / Olive (₹500)'
+  }
+  // ₹2000: Magenta (Deep magenta: R > 120, B > 90, G < 180, (R - G) > 15, saturation >= 0.16)
+  else if (avgR > 120 && avgB > 90 && avgG < 180 && (avgR - avgG) > 15 && saturation >= 0.16) {
     hasValidBanknoteColor = true
     presenceScore = 0.90
     matchedColorTheme = 'Magenta (₹2000)'
@@ -967,8 +980,8 @@ export async function recognizeBanknote(
       state = 'LOW_CONFIDENCE'
       uncertainReason = 'blur_detected'
       spokenText = failSpeech
-    } else if (topMatch.prob < 0.75) {
-      // CALIBRATED REJECTION THRESHOLD: Require >= 0.75 (75%)
+    } else if (topMatch.prob < 0.70) {
+      // CALIBRATED REJECTION THRESHOLD: Require >= 0.70 (70%)
       isConfident = false
       state = 'LOW_CONFIDENCE'
       uncertainReason = 'low_confidence'
@@ -978,7 +991,7 @@ export async function recognizeBanknote(
           : lang === 'pa'
           ? 'ਕਿਰਪਾ ਕਰਕੇ ਨੋਟ ਨੂੰ ਕੈਮਰੇ ਸਾਹਮਣੇ ਸਪਸ਼ਟ ਤੌਰ ਤੇ ਫੜੋ।'
           : 'Please hold the note clearly in front of the camera.'
-    } else if (scoreMargin < 0.20) {
+    } else if (scoreMargin < 0.15) {
       isConfident = false
       state = 'LOW_CONFIDENCE'
       uncertainReason = 'confused_denominations'
@@ -988,11 +1001,11 @@ export async function recognizeBanknote(
           : lang === 'pa'
           ? 'ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਸਮੇਂ ਵਿੱਚ ਇੱਕ ਹੀ ਨੋਟ ਸਕੈਨ ਕਰੋ।'
           : 'Please scan one note at a time.'
-    } else if (topMatch.cls === 'INR_100' && !(chromaticProfile.b > chromaticProfile.g + 4 && chromaticProfile.r > chromaticProfile.g + 2)) {
-      // Hard negative safeguard: ₹100 Lavender must have genuine violet tint, not neutral grey/laptop screen
+    } else if (topMatch.cls === 'INR_100' && chromaticProfile.contrast < 30) {
+      // Under-contrast safeguard: reject severely washed-out captures
       isConfident = false
       state = 'LOW_CONFIDENCE'
-      uncertainReason = 'ordinary_object'
+      uncertainReason = 'low_contrast'
       spokenText = noBanknoteSpeech
     } else {
       // Verified High-Confidence Indian Banknote Recognition

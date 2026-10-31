@@ -112,28 +112,50 @@ function mockDetectBanknotePresence(profile) {
   if (darkRatio > 0.28 && brightRatio > 0.20 && (hGrad > 2.8 || vGrad > 2.8)) {
     return { hasBanknotePresence: false, rejectionReason: 'Keyboard / hardware surface' }
   }
-  // 3. Digital display / cool white screen
-  if (avgLuma > 120 && saturation < 0.12 && (avgB >= avgR + 2 || maxChannelDiff < 16)) {
+  // 3. Digital display / cool white screen (Monochrome low-saturation displays)
+  if ((avgLuma > 110 && saturation < 0.055 && maxChannelDiff < 14) || 
+      (avgLuma > 150 && saturation < 0.06 && avgB >= avgR + 10)) {
     return { hasBanknotePresence: false, rejectionReason: 'Computer screen / laptop display' }
   }
   // 4. Document / receipt
-  if (brightRatio > 0.50 || (avgLuma > 175 && saturation < 0.14)) {
+  if (brightRatio > 0.65 || (avgLuma > 195 && saturation < 0.05 && maxChannelDiff < 10)) {
     return { hasBanknotePresence: false, rejectionReason: 'Document / receipt page' }
   }
   // 5. Solid featureless wall
-  if (contrast < 32 && hGrad < 1.3 && vGrad < 1.3) {
+  if (contrast < 30 && hGrad < 1.1 && vGrad < 1.1) {
     return { hasBanknotePresence: false, rejectionReason: 'Featureless solid surface' }
   }
 
-  // 6. Positive chromatic verification
-  if (avgB > 95 && avgR > 85 && avgB > avgG + 6 && avgR > avgG + 4 && saturation >= 0.14) {
-    return { hasBanknotePresence: true, denomination: 'INR_100' }
-  }
-  if (avgR > 125 && avgG > 95 && avgB < 95 && avgR > avgB + 35 && saturation >= 0.24) {
+  // 6. Positive chromatic verification with optical discrimination
+  // ₹200: Bright Yellow-Orange (Orange: R > G + 25, R > B + 55, saturation >= 0.20)
+  if (avgR > 125 && avgG > 95 && avgR > avgG + 25 && avgR > avgB + 55 && saturation >= 0.20) {
     return { hasBanknotePresence: true, denomination: 'INR_200' }
   }
-  if (avgB > 105 && avgB > avgR + 15 && saturation >= 0.18) {
+  // ₹20: Greenish Yellow (High luma > 185, R & G both high with G >= R - 15, maxChannelDiff >= 40)
+  if (avgG > 100 && avgR > 100 && avgLuma > 185 && avgG >= avgR - 15 && avgR > avgB + 35 && saturation >= 0.14) {
+    return { hasBanknotePresence: true, denomination: 'INR_20' }
+  }
+  // ₹10: Chocolate Brown (Warm brown: R > G > B, saturation >= 0.15)
+  if (avgR > 90 && avgG > 55 && avgR > avgG + 15 && avgG > avgB && saturation >= 0.15) {
+    return { hasBanknotePresence: true, denomination: 'INR_10' }
+  }
+  // ₹50: Fluorescent Blue (Cyan: G > R and B > R + 10)
+  if (avgB > 105 && avgB > avgR + 10 && avgG > avgR + 5 && saturation >= 0.12) {
     return { hasBanknotePresence: true, denomination: 'INR_50' }
+  }
+  // ₹100: Lavender (Violet tint: B > G + 3 with B >= R or R > G, sat >= 0.07, maxChannelDiff >= 12)
+  if ((avgB > 95 && avgB > avgG + 3 && saturation >= 0.07 && maxChannelDiff >= 12) ||
+      (avgR > 190 && avgG > 190 && avgB > 180 && saturation < 0.08 && hGrad > 1.2 && vGrad > 1.2)) {
+    return { hasBanknotePresence: true, denomination: 'INR_100' }
+  }
+  // ₹500: Stone Grey (G ≈ R and maxChannelDiff < 40) OR Legacy/Warm (Olive Brown)
+  if ((((avgG >= avgR - 12 && avgG >= avgB + 8) || (avgR >= avgG && avgR > avgB + 18 && avgG > avgB + 8)) &&
+       avgLuma > 70 && avgLuma < 210 && hGrad > 1.1 && vGrad > 1.1 && saturation >= 0.08 && maxChannelDiff >= 14)) {
+    return { hasBanknotePresence: true, denomination: 'INR_500' }
+  }
+  // ₹2000: Magenta (Deep magenta: R > 120, B > 90, G < 180, (R - G) > 15, saturation >= 0.16)
+  if (avgR > 120 && avgB > 90 && avgG < 180 && (avgR - avgG) > 15 && saturation >= 0.16) {
+    return { hasBanknotePresence: true, denomination: 'INR_2000' }
   }
 
   return { hasBanknotePresence: false, rejectionReason: 'No Indian banknote chromatic pattern' }
@@ -175,13 +197,49 @@ runTest('Stage 1 REJECTS Printed Paper Document & Store Receipt', () => {
   assert(res.rejectionReason.includes('Document') || res.rejectionReason.includes('receipt') || res.rejectionReason.includes('screen'))
 })
 
-runTest('Stage 1 ACCEPTS Genuine ₹100 Lavender Banknote', () => {
+runTest('Stage 1 ACCEPTS Genuine ₹100 Lavender Banknote (100_obverse)', () => {
   const res = mockDetectBanknotePresence({
-    avgR: 140, avgG: 120, avgB: 155, avgLuma: 132, contrast: 90,
-    darkRatio: 0.05, brightRatio: 0.10, hGrad: 1.8, vGrad: 1.6
+    avgR: 167.5, avgG: 160.0, avgB: 184.5, avgLuma: 165.0, contrast: 90,
+    darkRatio: 0.03, brightRatio: 0.10, hGrad: 1.8, vGrad: 1.6
   })
   assert.strictEqual(res.hasBanknotePresence, true)
   assert.strictEqual(res.denomination, 'INR_100')
+})
+
+runTest('Stage 1 ACCEPTS Genuine ₹100 Reverse Series (100_reverse)', () => {
+  const res = mockDetectBanknotePresence({
+    avgR: 181.8, avgG: 170.9, avgB: 188.4, avgLuma: 176.2, contrast: 85,
+    darkRatio: 0.02, brightRatio: 0.12, hGrad: 1.7, vGrad: 1.5
+  })
+  assert.strictEqual(res.hasBanknotePresence, true)
+  assert.strictEqual(res.denomination, 'INR_100')
+})
+
+runTest('Stage 1 ACCEPTS Genuine ₹500 Stone Grey Banknote (500_obverse)', () => {
+  const res = mockDetectBanknotePresence({
+    avgR: 178.7, avgG: 181.6, avgB: 154.6, avgLuma: 177.7, contrast: 95,
+    darkRatio: 0.03, brightRatio: 0.11, hGrad: 1.8, vGrad: 1.6
+  })
+  assert.strictEqual(res.hasBanknotePresence, true)
+  assert.strictEqual(res.denomination, 'INR_500')
+})
+
+runTest('Stage 1 ACCEPTS Genuine ₹500 Legacy Banknote (500_old_obverse)', () => {
+  const res = mockDetectBanknotePresence({
+    avgR: 184.0, avgG: 171.0, avgB: 131.9, avgLuma: 170.5, contrast: 100,
+    darkRatio: 0.04, brightRatio: 0.10, hGrad: 1.9, vGrad: 1.7
+  })
+  assert.strictEqual(res.hasBanknotePresence, true)
+  assert.strictEqual(res.denomination, 'INR_500')
+})
+
+runTest('Stage 1 ACCEPTS Genuine ₹20 Banknote (20_obverse)', () => {
+  const res = mockDetectBanknotePresence({
+    avgR: 219.0, avgG: 216.1, avgB: 156.0, avgLuma: 210.1, contrast: 105,
+    darkRatio: 0.02, brightRatio: 0.15, hGrad: 1.8, vGrad: 1.6
+  })
+  assert.strictEqual(res.hasBanknotePresence, true)
+  assert.strictEqual(res.denomination, 'INR_20')
 })
 
 runTest('Stage 1 ACCEPTS Genuine ₹200 Bright Orange Banknote', () => {
@@ -193,10 +251,10 @@ runTest('Stage 1 ACCEPTS Genuine ₹200 Bright Orange Banknote', () => {
   assert.strictEqual(res.denomination, 'INR_200')
 })
 
-runTest('Stage 2 Neural Rejection: Requires confidence >= 0.75 and margin >= 0.20', () => {
-  const topProb = 0.62 // below 0.75
+runTest('Stage 2 Neural Rejection: Requires confidence >= 0.70 and margin >= 0.15', () => {
+  const topProb = 0.62 // below 0.70
   const secondProb = 0.25
-  const isConfident = topProb >= 0.75 && (topProb - secondProb) >= 0.20
+  const isConfident = topProb >= 0.70 && (topProb - secondProb) >= 0.15
   assert.strictEqual(isConfident, false)
 })
 
