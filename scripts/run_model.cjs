@@ -4,10 +4,12 @@
  *
  * Runs the real COCO-SSD object detection model and full NaviAble AI
  * processing pipeline (Spatial Localization, Proximity Assessment, Natural Voice Synthesis)
- * on a test image.
+ * on one or more test images.
  *
  * Usage:
- *   node scripts/run_model.cjs [path/to/image.jpg]
+ *   node scripts/run_model.cjs                  # Runs on all test_assets/
+ *   node scripts/run_model.cjs --all            # Runs on all test_assets/
+ *   node scripts/run_model.cjs test_assets/bus.jpg
  */
 
 const fs = require('fs');
@@ -83,50 +85,22 @@ function generateSceneDescription(detections) {
   return `Navi can see ${parts.join(', ')}, and ${last}.`;
 }
 
-async function main() {
-  const imageArg = process.argv[2] || 'test_assets/bus.jpg';
-  const imagePath = path.resolve(process.cwd(), imageArg);
-
-  if (!fs.existsSync(imagePath)) {
-    console.error(`[ERROR] Image file not found: ${imagePath}`);
-    process.exit(1);
-  }
-
-  console.log('==============================================================');
-  console.log('       NAVIABLE AI — REAL IN-BROWSER MODEL INFERENCE ENGINE    ');
-  console.log('       Beyond Vision. Beyond Limits.                         ');
-  console.log('==============================================================\n');
-
-  console.log(`[1/4] Reading input image: ${path.basename(imagePath)}`);
+async function processImage(model, imagePath) {
+  const baseName = path.basename(imagePath);
   const image = sharp(imagePath);
   const metadata = await image.metadata();
-  console.log(`      Dimensions: ${metadata.width} × ${metadata.height} | Format: ${metadata.format}`);
 
-  // Extract raw RGB pixel buffer
   const { data, info } = await image
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
-  console.log(`\n[2/4] Loading pretrained COCO-SSD (MobileNet v2)...`);
-  const loadStart = Date.now();
-  const model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
-  const loadDuration = Date.now() - loadStart;
-  console.log(`      Model ready in ${loadDuration} ms.`);
-
-  console.log(`\n[3/4] Converting pixels into 3D Tensor and running inference...`);
   const tensor = tf.tensor3d(new Uint8Array(data), [info.height, info.width, 3], 'int32');
 
   const inferStart = Date.now();
   const rawPredictions = await model.detect(tensor);
   const inferDuration = Date.now() - inferStart;
-  tensor.dispose(); // clean memory
-
-  console.log(`      Inference completed in ${inferDuration} ms.`);
-  console.log(`      Found ${rawPredictions.length} object(s) with confidence >= 0.50.\n`);
-
-  console.log('[4/4] Multi-modal Analysis & Accessibility Pipeline:');
-  console.log('--------------------------------------------------------------');
+  tensor.dispose();
 
   const processedDetections = rawPredictions.map((pred) => {
     const pos = calcPosition(pred.bbox, info.width);
@@ -140,32 +114,96 @@ async function main() {
     };
   });
 
-  if (processedDetections.length === 0) {
-    console.log('  No objects detected above threshold.');
+  const voiceAnnouncement = generateSceneDescription(processedDetections);
+
+  return {
+    file: baseName,
+    dimensions: `${info.width} × ${info.height}`,
+    durationMs: inferDuration,
+    detections: processedDetections,
+    announcement: voiceAnnouncement,
+  };
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  let targetFiles = [];
+
+  const testAssetsDir = path.resolve(process.cwd(), 'test_assets');
+
+  if (args.length === 0 || args.includes('--all')) {
+    if (fs.existsSync(testAssetsDir)) {
+      targetFiles = fs.readdirSync(testAssetsDir)
+        .filter((f) => /\.(jpe?g|png|webp)$/i.test(f))
+        .map((f) => path.join(testAssetsDir, f));
+    }
   } else {
-    processedDetections.forEach((d, i) => {
-      console.log(`  [Object #${i + 1}]`);
-      console.log(`    Class:       ${d.class.toUpperCase()}`);
-      console.log(`    Confidence:  ${d.score}%`);
-      console.log(`    BoundingBox: [x=${d.bbox[0]}, y=${d.bbox[1]}, w=${d.bbox[2]}, h=${d.bbox[3]}]`);
-      console.log(`    Spatial Pos: ${d.position} sector`);
-      console.log(`    Proximity:   ${d.proximity.zone} (${d.proximity.relativeSize} frame coverage)`);
-      console.log(`    Alert Level: ${d.proximity.level}`);
-      console.log('');
-    });
+    targetFiles = args.map((arg) => path.resolve(process.cwd(), arg));
   }
 
-  const voiceAnnouncement = generateSceneDescription(processedDetections);
-  console.log('--------------------------------------------------------------');
-  console.log('🔊 SYNTHESIZED SPOKEN FEEDBACK (TTS):');
-  console.log(`   "${voiceAnnouncement}"`);
-  console.log('--------------------------------------------------------------\n');
+  if (targetFiles.length === 0) {
+    console.error('[ERROR] No image files found to process.');
+    process.exit(1);
+  }
 
-  console.log('✅ Model inference executed successfully with genuine neural network weights.\n');
+  console.log('==============================================================');
+  console.log('       NAVIABLE AI — REAL IN-BROWSER MODEL INFERENCE ENGINE    ');
+  console.log('       Beyond Vision. Beyond Limits.                         ');
+  console.log('==============================================================\n');
+
+  console.log(`[1/3] Loading pretrained COCO-SSD (MobileNet v2)...`);
+  const loadStart = Date.now();
+  const model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+  const loadDuration = Date.now() - loadStart;
+  console.log(`      Model ready in ${loadDuration} ms.\n`);
+
+  console.log(`[2/3] Processing ${targetFiles.length} image(s)...`);
+  console.log('--------------------------------------------------------------');
+
+  const summary = [];
+
+  for (let idx = 0; idx < targetFiles.length; idx++) {
+    const filePath = targetFiles[idx];
+    if (!fs.existsSync(filePath)) {
+      console.warn(`[WARN] Skipping missing file: ${filePath}`);
+      continue;
+    }
+
+    const res = await processImage(model, filePath);
+    summary.push(res);
+
+    console.log(`\n📸 Frame [${idx + 1}/${targetFiles.length}]: ${res.file} (${res.dimensions})`);
+    console.log(`   Inference Time: ${res.durationMs} ms | Detections: ${res.detections.length}`);
+
+    if (res.detections.length === 0) {
+      console.log('   No objects detected with confidence >= 50%.');
+    } else {
+      res.detections.forEach((d, i) => {
+        console.log(
+          `   #${i + 1} ${d.class.toUpperCase()} (${d.score}%) | ${d.position} sector | Proximity: ${d.proximity.zone} (${d.proximity.relativeSize}) [${d.proximity.level}]`
+        );
+      });
+    }
+
+    console.log(`   🔊 Spoken: "${res.announcement}"`);
+  }
+
+  console.log('\n==============================================================');
+  console.log('[3/3] Inference Batch Summary:');
+  console.log('--------------------------------------------------------------');
+  summary.forEach((s) => {
+    const classes = s.detections.map((d) => `${d.class}(${d.score}%)`).join(', ') || 'None';
+    console.log(`• ${s.file.padEnd(14)} | ${s.durationMs.toString().padStart(4)} ms | ${classes}`);
+  });
+
+  const totalInferMs = summary.reduce((acc, s) => acc + s.durationMs, 0);
+  const avgInferMs = Math.round(totalInferMs / summary.length);
+  console.log('--------------------------------------------------------------');
+  console.log(`Average inference latency per frame: ${avgInferMs} ms (~${(1000 / avgInferMs).toFixed(1)} FPS CPU)`);
+  console.log('✅ Real neural network inference run complete across all assets.\n');
 }
 
 main().catch((err) => {
   console.error('[FATAL ERROR]:', err);
   process.exit(1);
 });
-
