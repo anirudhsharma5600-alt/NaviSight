@@ -94,7 +94,7 @@ export default function OCRReader() {
 
     try {
       stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       })
     } catch (err: any) {
@@ -126,6 +126,8 @@ export default function OCRReader() {
       video.defaultMuted = true
       video.playsInline = true
       video.autoplay = true
+      video.setAttribute('playsinline', 'true')
+      video.setAttribute('webkit-playsinline', 'true')
 
       // Wait for loadedmetadata
       await new Promise<void>((resolve) => {
