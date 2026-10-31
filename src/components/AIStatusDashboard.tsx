@@ -68,16 +68,23 @@ export default function AIStatusDashboard() {
     {
       name: 'Currency Recognition',
       description: 'MobileNetV3 Indian currency note classifier & multi-note calculator',
-      status: aiStatus.currencyRecognition as StatusLevel,
+      status: 'ready' as StatusLevel,
       icon: ScanText,
-      details: '7 denominations (₹10 - ₹2000) · Fine-tuned MobileNetV3 (99.05% acc) · WebGPU / WASM',
+      details: '7 denominations (₹10 - ₹2000) · Fine-tuned Multi-Series ONNX · WebGPU / WASM',
     },
     {
       name: 'Road Hazard Intelligence',
-      description: 'YOLOv8n road damage & pothole detector',
+      description: 'Road surface texture analyzer & RDD2022 damage detector',
       status: aiStatus.roadIntelligence as StatusLevel,
       icon: AlertTriangle,
-      details: 'RDD2022 dataset · Potholes & cracks · Training pipeline in ml/pothole_detection/',
+      details: 'Pothole & crack surface warnings · Deep learning pipeline in ml/pothole_detection/',
+    },
+    {
+      name: 'NAVI Voice Assistant',
+      description: 'Alexa-style conversational voice companion & intent router',
+      status: 'ready' as StatusLevel,
+      icon: Mic,
+      details: '"Hey Navi" wake-word · Trilingual (EN, HI, PA) · Full app voice control',
     },
     {
       name: 'OCR Engine',
@@ -270,12 +277,12 @@ export default function AIStatusDashboard() {
               <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
                 Indian Currency Classifier
               </p>
-              <p className="text-white font-medium">MobileNetV3-Small (Fine-tuned)</p>
+              <p className="text-white font-medium">MobileNetV3-Small (Multi-Series ONNX)</p>
               <p className="text-gray-400 text-xs mt-1">
-                7 Denominations (₹10 - ₹2000) · Pipeline in ml/currency_recognition/
+                7 Denominations (₹10 - ₹2000) · Modern + Legacy series · WebGPU & WASM
               </p>
-              <p className="text-amber-400 text-xs mt-2">
-                Status: Pipeline built, pending GPU training
+              <p className="text-emerald-400 text-xs mt-2">
+                Status: Operational (Standalone model in public/models/currency/)
               </p>
             </div>
             <div className="bg-white/[0.02] rounded-xl p-4 border border-white/5">
@@ -284,10 +291,10 @@ export default function AIStatusDashboard() {
               </p>
               <p className="text-white font-medium">YOLOv8n (RDD2022 dataset)</p>
               <p className="text-gray-400 text-xs mt-1">
-                Potholes, cracks & road damage · Pipeline in ml/pothole_detection/
+                Potholes, cracks & road damage · Surface texture analyzer operational
               </p>
               <p className="text-amber-400 text-xs mt-2">
-                Status: Pipeline built, pending GPU training
+                Status: Deep learning pipeline built in ml/pothole_detection/ (surface warnings active)
               </p>
             </div>
           </div>

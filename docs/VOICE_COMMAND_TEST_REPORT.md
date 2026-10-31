@@ -66,3 +66,4 @@ The central speech controller enforces the required priority order:
 - **LOW:** General object narration (never interrupts currency or proximity).
 
 Verified: When currency scanning is active or a critical proximity alert fires, low-priority person narration is automatically suppressed.
+

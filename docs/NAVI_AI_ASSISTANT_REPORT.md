@@ -76,3 +76,4 @@ Available globally across every route:
 - Mounted in `App.tsx` for seamless multi-page control.
 - Displays live pulse animation, current state badge, and quick command chips.
 - Allows immediate switching between English, Hindi, and Punjabi.
+

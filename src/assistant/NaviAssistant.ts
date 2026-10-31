@@ -212,3 +212,4 @@ class NaviAssistantController {
 }
 
 export const NaviAssistant = new NaviAssistantController()
+
