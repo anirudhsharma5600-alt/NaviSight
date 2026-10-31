@@ -139,9 +139,11 @@ export interface TrackedRoadObject {
   position: 'LEFT' | 'CENTRE' | 'RIGHT'
   relativeArea: number
   isApproaching: boolean
+  isReceding: boolean
   firstSeen: number
   lastSeen: number
   lastAnnounced: number
+  lastAnnouncedMovement: 'approaching' | 'receding' | 'steady'
   consecutiveFrames: number
   sizeHistory: number[]
 }
@@ -168,6 +170,33 @@ class RoadIntelligenceEngine {
   private readonly CLASS_COOLDOWN_MS = 6000 // 6 seconds before repeating same class in same zone
   private readonly MIN_CONFIRMATION_FRAMES = 2 // Debounce transient false positives
 
+  private getObjectInfo(className: string): RoadObjectInfo {
+    const key = className.toLowerCase()
+    const known = ROAD_OBJECT_CATALOG[key]
+    if (known) return known
+
+    // Include everyday detector classes that are not in the road-specific list.
+    const hindiNames: Record<string, string> = {
+      'sports ball': 'गेंद', bottle: 'बोतल', 'wine glass': 'गिलास', cup: 'कप', fork: 'कांटा',
+      knife: 'चाकू', spoon: 'चम्मच', bowl: 'कटोरा', banana: 'केला', apple: 'सेब',
+      sandwich: 'सैंडविच', orange: 'संतरा', broccoli: 'ब्रोकली', carrot: 'गाजर', pizza: 'पिज़्ज़ा',
+      donut: 'डोनट', cake: 'केक', couch: 'सोफ़ा', 'potted plant': 'गमले का पौधा', bed: 'बिस्तर',
+      'dining table': 'मेज़', toilet: 'टॉयलेट', tv: 'टीवी', laptop: 'लैपटॉप', mouse: 'माउस',
+      remote: 'रिमोट', keyboard: 'कीबोर्ड', 'cell phone': 'मोबाइल फ़ोन', microwave: 'माइक्रोवेव',
+      oven: 'ओवन', toaster: 'टोस्टर', sink: 'सिंक', refrigerator: 'फ़्रिज', book: 'किताब',
+      clock: 'घड़ी', vase: 'फूलदान', scissors: 'कैंची', 'teddy bear': 'टेडी बियर',
+      umbrella: 'छाता', handbag: 'हैंडबैग', backpack: 'बैग', suitcase: 'सूटकेस',
+    }
+    const readableName = key.replace(/_/g, ' ')
+    return {
+      category: 'other',
+      displayName: readableName,
+      hindiName: hindiNames[key] || readableName,
+      punjabiName: readableName,
+      urgency: 'LOW',
+    }
+  }
+
   /**
    * Process live detection frame for road intelligence narration.
    */
@@ -185,10 +214,10 @@ class RoadIntelligenceEngine {
     const lang = options?.language || VoiceManager.getLanguage() || 'en'
     const shouldSpeak = options?.generalNarrationEnabled ?? false
 
-    // Filter to known road & street objects
+    // Keep all supported detector classes so common indoor objects are narrated too.
     const roadDetections = detections.filter(d => {
-      const info = ROAD_OBJECT_CATALOG[d.class.toLowerCase()]
-      return info !== undefined && d.score >= 0.45
+      const minimumScore = ROAD_OBJECT_CATALOG[d.class.toLowerCase()] ? 0.45 : 0.50
+      return d.score >= minimumScore
     })
 
     const currentIds = new Set<number>()
@@ -204,7 +233,7 @@ class RoadIntelligenceEngine {
     // Update tracking
     for (const det of roadDetections) {
       const cls = det.class.toLowerCase()
-      const info = ROAD_OBJECT_CATALOG[cls]!
+      const info = this.getObjectInfo(cls)
       const area = det.bbox[2] * det.bbox[3]
       const relArea = area / frameArea
 
@@ -224,9 +253,11 @@ class RoadIntelligenceEngine {
           position: det.position,
           relativeArea: relArea,
           isApproaching: false,
+          isReceding: false,
           firstSeen: now,
           lastSeen: now,
           lastAnnounced: 0,
+          lastAnnouncedMovement: 'steady',
           consecutiveFrames: 1,
           sizeHistory: [relArea],
         }
@@ -239,11 +270,15 @@ class RoadIntelligenceEngine {
         tracked.sizeHistory.push(relArea)
         if (tracked.sizeHistory.length > 6) tracked.sizeHistory.shift()
 
-        // Detect approach (smoothed growth across frames)
+        // Estimate relative movement from smoothed box-size changes. Camera
+        // movement can also change apparent size, so narration stays tentative.
         if (tracked.sizeHistory.length >= 4) {
           const firstAvg = (tracked.sizeHistory[0] + tracked.sizeHistory[1]) / 2
           const recentAvg = (tracked.sizeHistory[tracked.sizeHistory.length - 2] + tracked.sizeHistory[tracked.sizeHistory.length - 1]) / 2
-          tracked.isApproaching = recentAvg > firstAvg * 1.25 && recentAvg >= 0.04
+          const meaningfulChange = Math.max(0.0015, firstAvg * 0.12)
+          const change = recentAvg - firstAvg
+          tracked.isApproaching = change > meaningfulChange
+          tracked.isReceding = change < -meaningfulChange
         }
       }
 
@@ -288,11 +323,12 @@ class RoadIntelligenceEngine {
   private evaluateNarration(now: number, lang: 'en' | 'hi' | 'pa') {
     // Collect candidate objects with enough consecutive frames
     const candidates = Array.from(this.trackedObjects.values())
-      .filter(o => o.consecutiveFrames >= this.MIN_CONFIRMATION_FRAMES)
+      // PersonCrowdIntelligence already handles people; avoid competing person narration.
+      .filter(o => o.className !== 'person' && o.consecutiveFrames >= this.MIN_CONFIRMATION_FRAMES)
       .sort((a, b) => {
-        // Approaching items first, then larger (closer) items
-        if (a.isApproaching && !b.isApproaching) return -1
-        if (!a.isApproaching && b.isApproaching) return 1
+        // Approaching objects first, then nearer objects, then receding objects.
+        const movementRank = (object: TrackedRoadObject) => object.isApproaching ? 2 : object.isReceding ? 1 : 0
+        if (movementRank(a) !== movementRank(b)) return movementRank(b) - movementRank(a)
         return b.relativeArea - a.relativeArea
       })
 
@@ -304,17 +340,18 @@ class RoadIntelligenceEngine {
       const timeSinceLastAny = now - this.lastNarrationTimestamp
 
       // Skip if recently announced this specific object
-      if (timeSinceObjAnnounce < this.SAME_OBJECT_COOLDOWN_MS) continue
+      const movement = obj.isApproaching ? 'approaching' : obj.isReceding ? 'receding' : 'steady'
+      if (timeSinceObjAnnounce < this.SAME_OBJECT_COOLDOWN_MS && movement === obj.lastAnnouncedMovement) continue
 
       // Skip if repeated class in same position too quickly
       if (isSameAsLast && timeSinceLastAny < this.CLASS_COOLDOWN_MS) continue
 
       // Also ensure minimum gap between any narrations
-      if (timeSinceLastAny < 3200 && !obj.isApproaching) continue
+      if (timeSinceLastAny < 2600 && !obj.isApproaching) continue
 
       // Generate natural phrasing
       const phrase = this.formatPhrase(obj, lang)
-      const info = ROAD_OBJECT_CATALOG[obj.className]
+      const info = this.getObjectInfo(obj.className)
       const priority = obj.isApproaching ? 'HIGH' : info?.urgency === 'MEDIUM' ? 'MEDIUM' : 'LOW'
 
       // Dispatch through central VoiceManager
@@ -325,6 +362,7 @@ class RoadIntelligenceEngine {
 
       if (spoken) {
         obj.lastAnnounced = now
+        obj.lastAnnouncedMovement = movement
         this.lastNarrationTimestamp = now
         this.lastAnnouncedClass = obj.className
         this.lastAnnouncedPosition = obj.position
@@ -342,11 +380,7 @@ class RoadIntelligenceEngine {
    * "A traffic signal is detected on your right."
    */
   private formatPhrase(obj: TrackedRoadObject, lang: 'en' | 'hi' | 'pa'): string {
-    const info = ROAD_OBJECT_CATALOG[obj.className] || {
-      displayName: obj.className,
-      hindiName: obj.className,
-      punjabiName: obj.className,
-    }
+    const info = this.getObjectInfo(obj.className)
 
     const posEnglish =
       obj.position === 'CENTRE' ? 'ahead' : `on your ${obj.position.toLowerCase()}`
@@ -354,38 +388,49 @@ class RoadIntelligenceEngine {
       obj.position === 'CENTRE' ? 'सामने' : obj.position === 'LEFT' ? 'बाईं ओर' : 'दाईं ओर'
     const posPunjabi =
       obj.position === 'CENTRE' ? 'ਸਾਹਮਣੇ' : obj.position === 'LEFT' ? 'ਖੱਬੇ ਪਾਸੇ' : 'ਸੱਜੇ ਪਾਸੇ'
+    const distance = obj.relativeArea >= 0.22 ? 'very close' : obj.relativeArea >= 0.06 ? 'nearby' : 'farther away'
+    const hindiDistance = obj.relativeArea >= 0.22 ? 'बहुत पास' : obj.relativeArea >= 0.06 ? 'कुछ दूरी पर' : 'दूर'
 
     if (lang === 'hi') {
       if (obj.isApproaching) {
-        return `एक ${info.hindiName} पास आ रही है।`
+        return `${posHindi} ${info.hindiName} पास आती हुई दिखाई दे रही है।`
+      }
+      if (obj.isReceding) {
+        return `${posHindi} ${info.hindiName} दूर जाती हुई दिखाई दे रही है।`
       }
       if (info.category === 'traffic_control') {
-        return `${posHindi} ${info.hindiName} दिखाई दे रहा है।`
+        return `${posHindi} ${info.hindiName} ${hindiDistance} दिखाई दे रहा है।`
       }
-      return `${posHindi} एक ${info.hindiName} दिखाई दे रही है।`
+      return `${posHindi} ${info.hindiName} ${hindiDistance} दिखाई दे रही है।`
     }
 
     if (lang === 'pa') {
       if (obj.isApproaching) {
-        return `ਇੱਕ ${info.punjabiName} ਨੇੜੇ ਆ ਰਹੀ ਹੈ।`
+        return `${posPunjabi} ${info.punjabiName} ਨੇੜੇ ਆਉਂਦੀ ਦਿਖਾਈ ਦੇ ਰਹੀ ਹੈ।`
+      }
+      if (obj.isReceding) {
+        return `${posPunjabi} ${info.punjabiName} ਦੂਰ ਜਾਂਦੀ ਦਿਖਾਈ ਦੇ ਰਹੀ ਹੈ।`
       }
       if (info.category === 'traffic_control') {
-        return `${posPunjabi} ${info.punjabiName} ਦਿਖਾਈ ਦੇ ਰਿਹਾ ਹੈ।`
+        return `${posPunjabi} ${info.punjabiName} ${distance === 'farther away' ? 'ਦੂਰ' : 'ਨੇੜੇ'} ਦਿਖਾਈ ਦੇ ਰਿਹਾ ਹੈ।`
       }
-      return `${posPunjabi} ਇੱਕ ${info.punjabiName} ਦਿਖਾਈ ਦੇ ਰਹੀ ਹੈ।`
+      return `${posPunjabi} ${info.punjabiName} ${distance === 'farther away' ? 'ਦੂਰ' : 'ਨੇੜੇ'} ਦਿਖਾਈ ਦੇ ਰਹੀ ਹੈ।`
     }
 
     // English
     if (obj.isApproaching) {
-      return `A ${info.displayName} is approaching.`
+      return `A ${info.displayName} appears to be approaching ${posEnglish}.`
+    }
+    if (obj.isReceding) {
+      return `A ${info.displayName} appears to be moving away ${posEnglish}.`
     }
     if (info.category === 'traffic_control') {
-      return `A ${info.displayName} is detected ${posEnglish}.`
+      return `A ${info.displayName} is detected ${posEnglish}, ${distance}.`
     }
     if (info.category === 'vehicle') {
-      return `A ${info.displayName} is ${obj.position === 'CENTRE' ? 'visible ahead' : `${posEnglish}`}.`
+      return `A ${info.displayName} is ${obj.position === 'CENTRE' ? 'visible ahead' : `${posEnglish}`}, ${distance}.`
     }
-    return `A ${info.displayName} is ${posEnglish}.`
+    return `A ${info.displayName} is ${posEnglish}, ${distance}.`
   }
 
   /**
@@ -407,7 +452,7 @@ class RoadIntelligenceEngine {
 
     for (const obj of active) {
       const pos = obj.position === 'CENTRE' ? 'ahead' : `on the ${obj.position.toLowerCase()}`
-      const info = ROAD_OBJECT_CATALOG[obj.className]
+      const info = this.getObjectInfo(obj.className)
       const name = info?.displayName || obj.className
       if (info?.category === 'vehicle') {
         vehicles.push(`a ${name} ${pos}`)
