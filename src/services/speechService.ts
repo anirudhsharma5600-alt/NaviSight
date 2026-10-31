@@ -1,126 +1,92 @@
+import { VoiceManager, type AnnouncementPriority } from './VoiceAnnouncementManager'
+
 // ─── Types ───
 
 export type SpeechStatus = 'idle' | 'speaking' | 'paused'
 type SpeechListener = (status: SpeechStatus) => void
 
-// ─── State ───
-
-let status: SpeechStatus = 'idle'
-let lastSpokenText = ''
-let currentUtterance: SpeechSynthesisUtterance | null = null
-const speechQueue: string[] = []
-let processing = false
-const listeners: Set<SpeechListener> = new Set()
-
 // ─── Status Management ───
 
-function setStatus(s: SpeechStatus) {
-  status = s
-  listeners.forEach(fn => fn(s))
+export function setSpeechVolume(vol: number) {
+  VoiceManager.setVolume(vol)
+}
+
+export function getSpeechVolume(): number {
+  return VoiceManager.getVolume()
 }
 
 export function onSpeechStatusChange(fn: SpeechListener): () => void {
-  listeners.add(fn)
-  return () => listeners.delete(fn)
+  return VoiceManager.subscribe((st) => {
+    fn(st.isSpeaking ? 'speaking' : 'idle')
+  })
 }
 
 export function getSpeechStatus(): SpeechStatus {
-  return status
+  return VoiceManager.getStatus().isSpeaking ? 'speaking' : 'idle'
 }
 
 // ─── Core Functions ───
 
-export function speak(text: string, lang = 'en-US'): void {
-  if (!window.speechSynthesis) {
-    console.warn('[Speech] SpeechSynthesis not supported')
-    return
-  }
-  if (!text.trim()) return
-
-  window.speechSynthesis.cancel()
-  speechQueue.length = 0 // Clear queue on new speak
-
-  const utterance = new SpeechSynthesisUtterance(text)
-  utterance.lang = lang
-  utterance.rate = 0.9
-  utterance.pitch = 1.0
-
-  utterance.onstart = () => {
-    setStatus('speaking')
-    lastSpokenText = text
-  }
-  utterance.onend = () => {
-    currentUtterance = null
-    processQueue()
-  }
-  utterance.onerror = () => {
-    currentUtterance = null
-    setStatus('idle')
+export function speak(
+  text: string,
+  lang = 'en-US',
+  volume?: number,
+  priority: AnnouncementPriority = 'LOW'
+): void {
+  if (typeof volume === 'number') {
+    VoiceManager.setVolume(volume)
   }
 
-  currentUtterance = utterance
-  window.speechSynthesis.speak(utterance)
+  const langShort = lang.startsWith('hi') ? 'hi' : lang.startsWith('pa') ? 'pa' : 'en'
+  VoiceManager.announce(text, priority, {
+    lang: langShort,
+    force: priority === 'HIGH' || priority === 'MEDIUM',
+  })
 }
 
 export function queueSpeak(text: string): void {
-  if (!text.trim()) return
-  speechQueue.push(text)
-  if (!processing && status === 'idle') {
-    processQueue()
-  }
-}
-
-function processQueue(): void {
-  if (speechQueue.length === 0) {
-    processing = false
-    setStatus('idle')
-    return
-  }
-  processing = true
-  const next = speechQueue.shift()!
-  speak(next)
+  speak(text, 'en-US', undefined, 'LOW')
 }
 
 export function stopSpeaking(): void {
-  window.speechSynthesis?.cancel()
-  speechQueue.length = 0
-  currentUtterance = null
-  processing = false
-  setStatus('idle')
+  VoiceManager.stopAllSpeech()
 }
 
 export function pauseSpeaking(): void {
-  window.speechSynthesis?.pause()
-  setStatus('paused')
-}
-
-export function resumeSpeaking(): void {
-  window.speechSynthesis?.resume()
-  setStatus('speaking')
-}
-
-export function repeatLast(): void {
-  if (lastSpokenText) {
-    speak(lastSpokenText)
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.pause()
   }
 }
 
+export function resumeSpeaking(): void {
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    window.speechSynthesis.resume()
+  }
+}
+
+export function repeatLast(): void {
+  VoiceManager.repeatLast()
+}
+
 export function getLastSpokenText(): string {
-  return lastSpokenText
+  return VoiceManager.getStatus().lastSpokenText
 }
 
 export function isSpeaking(): boolean {
-  return status === 'speaking'
+  return VoiceManager.getStatus().isSpeaking
 }
 
 // ─── Browser Support Check ───
 
 export function isSpeechSynthesisSupported(): boolean {
-  return 'speechSynthesis' in window
+  return typeof window !== 'undefined' && 'speechSynthesis' in window
 }
 
 export function isSpeechRecognitionSupported(): boolean {
-  return 'SpeechRecognition' in window || 'webkitSpeechRecognition' in window
+  return (
+    typeof window !== 'undefined' &&
+    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+  )
 }
 
 // ─── Legacy Compatibility ───
@@ -131,8 +97,8 @@ export function describeDetections(
   if (detections.length === 0) return 'No objects detected in your surroundings.'
 
   const descriptions = detections
-    .filter(d => d.score > 0.45)
-    .map(d => {
+    .filter((d) => d.score > 0.45)
+    .map((d) => {
       const pos = d.position === 'CENTRE' ? 'in the centre' : `on your ${d.position.toLowerCase()}`
       return `${d.class} detected ${pos}`
     })

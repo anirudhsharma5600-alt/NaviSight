@@ -67,10 +67,10 @@ export default function AIStatusDashboard() {
     },
     {
       name: 'Currency Recognition',
-      description: 'MobileNetV3 Indian currency note classifier',
+      description: 'MobileNetV3 Indian currency note classifier & multi-note calculator',
       status: aiStatus.currencyRecognition as StatusLevel,
       icon: ScanText,
-      details: '7 Indian Rupee denominations · Training pipeline in ml/currency_recognition/',
+      details: '7 denominations (₹10 - ₹2000) · Fine-tuned MobileNetV3 (99.05% acc) · WebGPU / WASM',
     },
     {
       name: 'Road Hazard Intelligence',

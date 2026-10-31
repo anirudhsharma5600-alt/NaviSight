@@ -321,14 +321,14 @@ export function processDetectionsForProximity(
       triggerVibration(level)
     }
 
-    // Voice announcement with longer cooldown (4.5s) to avoid overlapping
+    // Voice announcement with calm cooldown (8.0s) to avoid repetitive alarming speech
     if (
       config.voiceEnabled &&
       highestPersonAlert.state === 'PERSON_APPEARS_CLOSE' &&
-      now - lastVoiceAlertTime >= 4500
+      now - lastVoiceAlertTime >= 8000
     ) {
       lastVoiceAlertTime = now
-      speak('Warning! A person appears very close.')
+      speak('Warning! A person appears very close.', 'en-US', undefined, 'HIGH')
     }
   } else {
     currentState = 'CLEAR'

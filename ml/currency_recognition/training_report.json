@@ -1,0 +1,137 @@
+{
+  "timestamp": "2026-10-31T15:12:34Z",
+  "model_architecture": "MobileNetV3-Small",
+  "input_resolution": "224x224x3",
+  "classes": [
+    "INR_10",
+    "INR_20",
+    "INR_50",
+    "INR_100",
+    "INR_200",
+    "INR_500",
+    "INR_2000"
+  ],
+  "class_mapping": {
+    "10": 0,
+    "20": 1,
+    "50": 2,
+    "100": 3,
+    "200": 4,
+    "500": 5,
+    "2000": 6
+  },
+  "train_samples": 1400,
+  "val_samples": 210,
+  "test_samples": 210,
+  "best_val_accuracy": 1.0,
+  "test_accuracy": 0.9905,
+  "test_metrics": {
+    "INR_10": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_20": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_50": {
+      "precision": 0.9375,
+      "recall": 1.0,
+      "f1": 0.9677,
+      "support": 30
+    },
+    "INR_100": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_200": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_500": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_2000": {
+      "precision": 1.0,
+      "recall": 0.9333,
+      "f1": 0.9655,
+      "support": 30
+    }
+  },
+  "confusion_matrix": [
+    [
+      30,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      30,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      30,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      30,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      30,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      30,
+      0
+    ],
+    [
+      0,
+      0,
+      2,
+      0,
+      0,
+      0,
+      28
+    ]
+  ]
+}

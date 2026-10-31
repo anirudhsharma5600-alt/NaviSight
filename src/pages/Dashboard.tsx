@@ -20,6 +20,8 @@ import { naviOn, setLatestDetections } from '../services/naviEventBus'
 import {
   processDetectionsForProximity, unlockAudioContext,
 } from '../services/proximityEngine'
+import { VoiceManager, type AudioOperatingMode } from '../services/VoiceAnnouncementManager'
+import { PersonTracker } from '../services/PersonAnnouncementTracker'
 
 // ─── Helper for readyState text ───
 function getReadyStateDescription(state: number): string {
@@ -50,6 +52,7 @@ export default function Dashboard() {
   const [modelStatus, setModelStatus] = useState<ModelStatus>('idle')
   const [detections, setDetections] = useState<Detection[]>([])
   const [audioEnabled, setAudioEnabled] = useState(true)
+  const [audioMode, setAudioMode] = useState<AudioOperatingMode>(VoiceManager.getMode())
   const [fps, setFps] = useState(0)
   const [inferenceMs, setInferenceMs] = useState(0)
   const [isDetecting, setIsDetecting] = useState(false)
@@ -203,12 +206,11 @@ export default function Dashboard() {
           processDetectionsForProximity(results, video.videoWidth, video.videoHeight)
         }
 
-        // Auto-announce new detections
-        if (audioEnabled && results.length > 0) {
-          const announcements = generateNewDetectionAnnouncements(results)
-          if (announcements.length > 0) {
-            speak(announcements.join('. '))
-          }
+        // Intelligent Person Event Tracking (Prevents repetitive shouts)
+        if (results.length > 0) {
+          PersonTracker.processFrame(results, video.videoWidth, video.videoHeight, {
+            generalNarrationEnabled: audioEnabled,
+          })
         }
       } catch {
         // skip frame on error
@@ -875,13 +877,51 @@ export default function Dashboard() {
 
                 {/* Audio Announcements */}
                 <button
-                  onClick={() => { setAudioEnabled(!audioEnabled); if (audioEnabled) stopSpeaking() }}
+                  onClick={() => {
+                    const next = !audioEnabled
+                    setAudioEnabled(next)
+                    if (!next) {
+                      VoiceManager.setMode('silent_visual')
+                      setAudioMode('silent_visual')
+                    } else {
+                      VoiceManager.setMode('general_assistance')
+                      setAudioMode('general_assistance')
+                    }
+                  }}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-full text-sm border border-gray-600/30 hover:bg-white/5 transition-all"
                   aria-label={audioEnabled ? 'Mute audio' : 'Enable audio'}
                 >
                   {audioEnabled ? <Volume2 className="w-4 h-4 text-green-400" /> : <VolumeX className="w-4 h-4 text-gray-400" />}
                   {audioEnabled ? 'Audio On' : 'Audio Off'}
                 </button>
+              </div>
+
+              {/* Mode-Based Audio Routing Controls (Part 4) */}
+              <div className="px-4 pb-3 flex flex-wrap items-center gap-1.5 text-xs border-t border-white/5 pt-3">
+                <span className="text-gray-400 text-[11px] font-mono mr-1">Voice Mode:</span>
+                {[
+                  { id: 'general_assistance', label: 'General Assistance' },
+                  { id: 'currency_reading', label: 'Currency Reading' },
+                  { id: 'obstacle_proximity', label: 'Obstacle & Proximity' },
+                  { id: 'silent_visual', label: 'Silent Visual' },
+                ].map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      const modeId = m.id as AudioOperatingMode
+                      setAudioMode(modeId)
+                      VoiceManager.setMode(modeId)
+                      setAudioEnabled(modeId !== 'silent_visual')
+                    }}
+                    className={`px-3 py-1 rounded-full font-medium transition-all ${
+                      audioMode === m.id
+                        ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 shadow-sm'
+                        : 'text-gray-400 hover:text-white bg-white/5 border border-white/5'
+                    }`}
+                  >
+                    {m.label}
+                  </button>
+                ))}
               </div>
 
               {/* Camera Error Alert */}
