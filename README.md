@@ -17,7 +17,9 @@ An AI-powered accessibility platform that helps visually impaired individuals un
 
 | Feature | Description | Status |
 |---------|------------|--------|
-| 🎯 **AI Vision Dashboard** | Real-time object detection with COCO-SSD (80 classes), bounding boxes, position labels (LEFT / CENTRE / RIGHT), confidence scores | ✅ Live |
+| 🎯 **AI Vision Dashboard** | Real-time object detection with a focused or wide scan area, position, approximate visual range, movement trend, and rate-limited safety alerts | ✅ Live |
+| 📏 **Optional Distance Sensor** | BLE ToF integration for a measured distance in the sensor beam | ✅ See `docs/HARDWARE_GUIDE.md` |
+| 👪 **Known People** | Save family photo profiles on-device and announce only a possible match in a separate camera mode | ✅ Local face matching |
 | 🎤 **Navi Voice Assistant** | Click-to-talk voice assistant with speech recognition, command parsing, and text-to-speech responses | ✅ Live |
 | 📖 **Smart OCR Reader** | Capture text from camera or uploaded images using Tesseract.js, with read-aloud and copy functionality | ✅ Live |
 | 🗺️ **Smart Navigation** | GPS location awareness with interactive OpenStreetMap, current coordinates, and center-on-me | ✅ Live |
@@ -34,6 +36,7 @@ An AI-powered accessibility platform that helps visually impaired individuals un
 - **No data uploaded** — camera and microphone data never leaves your device
 - **No API keys required** — completely free to use
 - **No recordings stored** — frames are processed and immediately discarded
+- **Known-person photos and face profiles** — kept only in this browser on this device and removable from the Known People page
 - **Safety disclaimer** — navigation data does not confirm a physically safe walking path
 
 ---
@@ -41,7 +44,7 @@ An AI-powered accessibility platform that helps visually impaired individuals un
 ## 🚀 Quick Start
 
 ### Prerequisites
-- **Node.js** 18+ and **npm** 9+
+- **Node.js** 20.19+ (or 22.12+) and **npm** 9+
 - **Chrome** or **Edge** browser (for Web Speech API support)
 
 ### Installation
@@ -79,12 +82,13 @@ npm run preview
 
 | Layer | Technology |
 |-------|-----------|
-| **Framework** | React 18 + TypeScript + Vite |
+| **Framework** | React 19 + TypeScript + Vite |
 | **Styling** | Tailwind CSS 3 |
 | **3D Graphics** | Three.js + React Three Fiber + Drei |
 | **Animations** | Framer Motion |
 | **Object Detection** | TensorFlow.js + COCO-SSD (MobileNet v2) |
-| **OCR** | Tesseract.js v5 |
+| **Known People** | Human face detection and embeddings, with local model files |
+| **OCR** | Tesseract.js v7 |
 | **Voice** | Web Speech API (SpeechRecognition + SpeechSynthesis) |
 | **Maps** | Leaflet + React-Leaflet + OpenStreetMap |
 | **Icons** | Lucide React |
@@ -139,7 +143,16 @@ src/
 1. Click **"Start Camera"** → allow camera
 2. Point at objects (people, chairs, bottles, phones, laptops)
 3. Watch bounding boxes appear with class names and positions
-4. Click **"Describe Surroundings"** to hear spoken descriptions
+4. Click **"Describe Area"** to hear a scene summary, approximate visual range, and movement trend
+5. Connect a compatible ToF sensor to hear its measured distance
+
+Choose **Focused** to limit the spoken scene and alerts to the center region, or **Wide** to include most of the frame. Camera distance is approximate; only a compatible ToF sensor supplies a measured range.
+
+### Known People (`/known-people`)
+1. Add one clear, front-facing photo and the person's name
+2. Start **Family matching** to compare one visible face against saved profiles
+3. Navi says **possible match** after a stable match; other people remain unidentified
+4. Remove any saved profile from this page to delete its photo and face profile from this browser
 
 ### Voice Assistant (`/voice`)
 1. Click the microphone button → allow microphone

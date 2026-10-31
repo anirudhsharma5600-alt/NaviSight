@@ -4,6 +4,7 @@ export type ScanAreaMode = 'focused' | 'wide'
 export type EstimatedRange = 'close' | 'nearby' | 'far'
 export type TargetMovement = 'approaching' | 'receding' | 'steady' | 'unknown'
 export type SpeechLanguage = 'en' | 'hi'
+export type SensorRangeTrend = 'APPROACHING' | 'RECEDING' | 'STABLE' | 'UNKNOWN'
 
 export interface ScanRegion {
   left: number
@@ -167,11 +168,25 @@ export function describeScene(
   mode: ScanAreaMode,
   language: SpeechLanguage,
   sensorDistanceCm: number | null,
+  sensorRangeTrend: SensorRangeTrend = 'UNKNOWN',
 ): string {
+  const sensorTrendNote = sensorRangeTrend === 'APPROACHING'
+    ? language === 'hi'
+      ? ' सेंसर की दूरी घट रही है, इसलिए उसकी किरण में कुछ पास आ रहा हो सकता है। सेंसर घुमाने से भी रीडिंग बदल सकती है।'
+      : ' The sensor range is decreasing, so something in its beam may be getting closer. Moving the sensor can also change the reading.'
+    : sensorRangeTrend === 'RECEDING'
+      ? language === 'hi'
+        ? ' सेंसर की दूरी बढ़ रही है, इसलिए उसकी किरण में कुछ दूर जा रहा हो सकता है। सेंसर घुमाने से भी रीडिंग बदल सकती है।'
+        : ' The sensor range is increasing, so something in its beam may be moving farther away. Moving the sensor can also change the reading.'
+      : sensorRangeTrend === 'STABLE'
+        ? language === 'hi'
+          ? ' सेंसर की दूरी अभी स्थिर है।'
+          : ' The sensor range has been steady over recent readings.'
+        : ''
   const sensorNote = sensorDistanceCm !== null
     ? language === 'hi'
-      ? ` दूरी सेंसर अपनी दिशा में ${Math.round(sensorDistanceCm)} सेंटीमीटर माप रहा है; उस वस्तु का नाम पहचाना नहीं गया है।`
-      : ` The distance sensor measures ${Math.round(sensorDistanceCm)} centimetres in its facing direction; it has not identified the object.`
+      ? ` दूरी सेंसर अपनी दिशा में ${Math.round(sensorDistanceCm)} सेंटीमीटर माप रहा है; उस वस्तु का नाम पहचाना नहीं गया है।${sensorTrendNote}`
+      : ` The distance sensor measures ${Math.round(sensorDistanceCm)} centimetres in its facing direction; it has not identified the object.${sensorTrendNote}`
     : ''
 
   if (objects.length === 0) {

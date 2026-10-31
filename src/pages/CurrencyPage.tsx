@@ -28,7 +28,7 @@ export default function CurrencyPage() {
   const [isScanning, setIsScanning] = useState(false)
   const [latestResult, setLatestResult] = useState<CurrencyRecognitionResult | null>(null)
   const [history, setHistory] = useState<CurrencyRecognitionResult[]>([])
-  const [selectedLanguage, setSelectedLanguage] = useState<'en' | 'hi' | 'pa'>('en')
+  const [selectedLanguage, setSelectedLanguage] = useState<'en' | 'hi' | 'pa'>('hi')
   const [autoSpeak, setAutoSpeak] = useState(true)
   const [isCaptured, setIsCaptured] = useState(false)
 
@@ -319,19 +319,23 @@ export default function CurrencyPage() {
                     {/* Denomination Card */}
                     <div
                       className="p-5 rounded-2xl border text-center transition-all"
-                      style={{
-                        backgroundColor: `${CLASS_METADATA[latestResult.denomination].color}20`,
-                        borderColor: `${CLASS_METADATA[latestResult.denomination].color}60`,
-                      }}
+                      style={latestResult.isConfident
+                        ? {
+                            backgroundColor: `${CLASS_METADATA[latestResult.denomination].color}20`,
+                            borderColor: `${CLASS_METADATA[latestResult.denomination].color}60`,
+                          }
+                        : { backgroundColor: 'rgba(245, 158, 11, 0.08)', borderColor: 'rgba(245, 158, 11, 0.35)' }}
                     >
                       <div
                         className="text-4xl font-extrabold font-display mb-1"
-                        style={{ color: CLASS_METADATA[latestResult.denomination].color }}
+                        style={{ color: latestResult.isConfident ? CLASS_METADATA[latestResult.denomination].color : '#fbbf24' }}
                       >
-                        {latestResult.displayName}
+                        {latestResult.isConfident ? latestResult.displayName : 'Unclear — scan again'}
                       </div>
                       <div className="text-xs font-medium text-gray-300">
-                        {latestResult.colorName} · {latestResult.noteTheme}
+                        {latestResult.isConfident
+                          ? `${latestResult.colorName} · ${latestResult.noteTheme}`
+                          : 'The note was not confirmed; hold it steady and scan again.'}
                       </div>
                     </div>
 

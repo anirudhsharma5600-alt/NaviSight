@@ -75,6 +75,7 @@ let currentState: ProximityState = 'CLEAR'
 // BLE hardware integration
 let sensorDistance: number | null = null
 let sensorDistanceAt = 0
+const sensorReadings: { centimeters: number; at: number }[] = []
 let bleConnected = false
 let bleDevice: any = null
 let bleCharacteristic: any = null
@@ -438,6 +439,23 @@ export function getSensorDistance(): number | null {
   return Date.now() - sensorDistanceAt <= 3000 ? sensorDistance : null
 }
 
+export type SensorRangeTrend = 'APPROACHING' | 'RECEDING' | 'STABLE' | 'UNKNOWN'
+
+export function getSensorRangeTrend(): SensorRangeTrend {
+  const now = Date.now()
+  if (getSensorDistance() === null) return 'UNKNOWN'
+  const recent = sensorReadings.filter((reading) => now - reading.at <= 2200)
+  if (recent.length < 4 || recent[recent.length - 1].at - recent[0].at < 900) return 'UNKNOWN'
+
+  const average = (values: typeof recent) => values.reduce((total, reading) => total + reading.centimeters, 0) / values.length
+  const start = average(recent.slice(0, 2))
+  const end = average(recent.slice(-2))
+  const threshold = Math.max(8, start * 0.12)
+  if (end < start - threshold) return 'APPROACHING'
+  if (end > start + threshold) return 'RECEDING'
+  return 'STABLE'
+}
+
 export async function connectBLESensor(): Promise<boolean> {
   if (!isBLESupported()) return false
   try {
@@ -461,17 +479,21 @@ export async function connectBLESensor(): Promise<boolean> {
       if (Number.isFinite(centimeters) && centimeters > 0 && centimeters <= 1000) {
         sensorDistance = centimeters
         sensorDistanceAt = Date.now()
+        sensorReadings.push({ centimeters, at: sensorDistanceAt })
+        if (sensorReadings.length > 8) sensorReadings.shift()
       }
     })
 
     bleDevice = device
     bleCharacteristic = characteristic
     bleConnected = true
+    sensorReadings.length = 0
     device.addEventListener('gattserverdisconnected', () => {
       bleConnected = false
       bleCharacteristic = null
       sensorDistance = null
       sensorDistanceAt = 0
+      sensorReadings.length = 0
     })
     return true
   } catch (err) {
@@ -480,6 +502,7 @@ export async function connectBLESensor(): Promise<boolean> {
     bleCharacteristic = null
     sensorDistance = null
     sensorDistanceAt = 0
+    sensorReadings.length = 0
     return false
   }
 }
@@ -498,4 +521,5 @@ export function disconnectBLESensor(): void {
   bleConnected = false
   sensorDistance = null
   sensorDistanceAt = 0
+  sensorReadings.length = 0
 }

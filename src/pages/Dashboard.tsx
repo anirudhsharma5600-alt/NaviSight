@@ -6,7 +6,7 @@ import {
   RefreshCw, SwitchCamera, Activity, CheckCircle2, XCircle, Info
 } from 'lucide-react'
 import {
-  loadModel, detectObjects, isModelLoaded, getModelStatus,
+  loadModel, detectObjects, getModelStatus,
   onModelStatusChange, getConfig, updateConfig, COCO_CLASSES,
   type Detection, type ModelStatus,
 } from '../services/objectDetection'
@@ -16,8 +16,9 @@ import { setCameraStatus } from '../services/modelManager'
 import { naviOn, setLatestDetections } from '../services/naviEventBus'
 import {
   connectBLESensor, disconnectBLESensor, getSensorDistance, isBLESupported,
-  isBLESensorConnected, processDetectionsForProximity, setAlertsEnabled,
-  setVoiceAlertsEnabled, unlockAudioContext, updateProximityConfig,
+  getSensorRangeTrend,
+  initProximityEngine, isBLESensorConnected, processDetectionsForProximity, setAlertsEnabled,
+  setVibrationEnabled, setVoiceAlertsEnabled, unlockAudioContext, updateProximityConfig,
 } from '../services/proximityEngine'
 import {
   analyzeSceneObjects, describeScene, getScanRegion, keepDetectionsInScanArea,
@@ -58,6 +59,7 @@ export default function Dashboard() {
   const [audioEnabled, setAudioEnabled] = useState(true)
   const [sensorConnected, setSensorConnected] = useState(isBLESensorConnected())
   const [sensorDistance, setSensorDistance] = useState<number | null>(getSensorDistance())
+  const [sensorRangeTrend, setSensorRangeTrend] = useState(getSensorRangeTrend())
   const [sensorConnecting, setSensorConnecting] = useState(false)
   const [fps, setFps] = useState(0)
   const [inferenceMs, setInferenceMs] = useState(0)
@@ -66,7 +68,6 @@ export default function Dashboard() {
   const [showDebug, setShowDebug] = useState(false)
   const [confidence, setConfidence] = useState(getConfig().confidenceThreshold)
   const [detectionInterval, setDetectionInterval] = useState(200)
-  const [totalDetected, setTotalDetected] = useState(0)
 
   // Detailed Debug State (Requirement D)
   const [debugInfo, setDebugInfo] = useState({
@@ -131,7 +132,7 @@ export default function Dashboard() {
     updateAvailableCameras()
   }, [updatePermissionStatus, updateAvailableCameras])
 
-  // Draw bounding boxes with futuristic style
+  // Draw one selected focus area and only the objects the user asked Navi to watch.
   const drawDetections = useCallback((dets: Detection[]) => {
     const canvas = canvasRef.current
     const video = videoRef.current
@@ -145,6 +146,19 @@ export default function Dashboard() {
     if (!ctx) return
 
     ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+    const region = getScanRegion(scanAreaMode)
+    ctx.save()
+    ctx.setLineDash([12, 8])
+    ctx.strokeStyle = 'rgba(0, 229, 255, 0.72)'
+    ctx.lineWidth = Math.max(2, canvas.width * 0.002)
+    ctx.strokeRect(
+      region.left * canvas.width,
+      region.top * canvas.height,
+      region.width * canvas.width,
+      region.height * canvas.height,
+    )
+    ctx.restore()
 
     dets.forEach((d) => {
       const [x, y, w, h] = d.bbox
@@ -183,7 +197,7 @@ export default function Dashboard() {
       ctx.textBaseline = 'top'
       ctx.fillText(label, x + 7, labelY + 4)
     })
-  }, [])
+  }, [scanAreaMode])
 
   // Detection loop
   const detectLoop = useCallback(async () => {
@@ -197,28 +211,25 @@ export default function Dashboard() {
     if (now - lastDetectionTime.current > detectionInterval) {
       const start = performance.now()
       try {
-        const results = await detectObjects(video)
+        const allResults = await detectObjects(video)
+        const results = keepDetectionsInScanArea(
+          allResults,
+          video.videoWidth,
+          video.videoHeight,
+          scanAreaMode,
+        )
+        const objects = analyzeSceneObjects(results, video.videoWidth, video.videoHeight)
+        const prioritizedDetections = objects.map((object) => object.detection)
         const elapsed = performance.now() - start
 
-        setDetections(results)
-        setLatestDetections(results) // Publish to shared store for voice assistant
-        setTotalDetected(prev => prev + results.length)
-        drawDetections(results)
+        setDetections(prioritizedDetections)
+        setSceneObjects(objects)
+        setLatestDetections(prioritizedDetections) // Publish focused results to voice commands.
+        drawDetections(prioritizedDetections)
         setInferenceMs(Math.round(elapsed))
         setFps(Math.round(1000 / Math.max(elapsed, 1)))
-
-        // Proximity detection & Warning Beep for close persons / obstacles
-        if (audioEnabled && results.length > 0) {
-          processDetectionsForProximity(results, video.videoWidth, video.videoHeight)
-        }
-
-        // Auto-announce new detections
-        if (audioEnabled && results.length > 0) {
-          const announcements = generateNewDetectionAnnouncements(results)
-          if (announcements.length > 0) {
-            speak(announcements.join('. '))
-          }
-        }
+        processDetectionsForProximity(prioritizedDetections, video.videoWidth, video.videoHeight)
+        setSensorDistance(getSensorDistance())
       } catch {
         // skip frame on error
       }
@@ -226,13 +237,12 @@ export default function Dashboard() {
     }
 
     animationRef.current = requestAnimationFrame(detectLoop)
-  }, [cameraActive, drawDetections, detectionInterval, audioEnabled])
+  }, [cameraActive, drawDetections, detectionInterval, scanAreaMode])
 
   // Start/stop detection loop
   useEffect(() => {
     if (cameraActive && modelStatus === 'ready') {
       setIsDetecting(true)
-      resetAnnouncementCooldowns()
       animationRef.current = requestAnimationFrame(detectLoop)
     } else {
       setIsDetecting(false)
@@ -247,6 +257,22 @@ export default function Dashboard() {
     updateConfig({ confidenceThreshold: confidence })
   }, [confidence])
 
+  useEffect(() => {
+    setAlertsEnabled(audioEnabled)
+    setVibrationEnabled(audioEnabled)
+    setVoiceAlertsEnabled(audioEnabled)
+    updateProximityConfig({ language: speechLanguage })
+  }, [audioEnabled, speechLanguage])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setSensorConnected(isBLESensorConnected())
+      setSensorDistance(getSensorDistance())
+      setSensorRangeTrend(getSensorRangeTrend())
+    }, 400)
+    return () => window.clearInterval(timer)
+  }, [])
+
   // ─── A. CAMERA INITIALIZATION & B. VIDEO RENDERING ───
   const startCamera = useCallback(async (targetDeviceId?: string) => {
     // Prevent duplicate camera initialization (Requirement C)
@@ -258,6 +284,8 @@ export default function Dashboard() {
     setIsStartingCamera(true)
     setCameraError('')
     unlockAudioContext() // Unlock Web Audio API on explicit user interaction
+    initProximityEngine()
+    resetSceneAnalysis()
 
     setDebugInfo(prev => ({
       ...prev,
@@ -465,6 +493,10 @@ export default function Dashboard() {
     setCameraActive(false)
     setCameraStatus('inactive')
     setDetections([])
+    setSceneObjects([])
+    setLatestDetections([])
+    resetSceneAnalysis()
+    initProximityEngine()
     setDebugInfo(prev => ({
       ...prev,
       streamStatus: 'inactive',
@@ -497,7 +529,34 @@ export default function Dashboard() {
     }, 200)
   }, [stopCamera, startCamera])
 
-  // Listen for voice assistant camera commands via event bus with proper dependency array (Requirement C)
+  const describeSurroundings = useCallback(() => {
+    const narration = describeScene(sceneObjects, scanAreaMode, speechLanguage, sensorDistance, sensorRangeTrend)
+    speak(narration, speechLanguage === 'hi' ? 'hi-IN' : 'en-US')
+  }, [sceneObjects, scanAreaMode, speechLanguage, sensorDistance, sensorRangeTrend])
+
+  const handleConnectSensor = useCallback(async () => {
+    setSensorConnecting(true)
+    try {
+      const connected = await connectBLESensor()
+      setSensorConnected(connected)
+      speak(
+        connected
+          ? speechLanguage === 'hi' ? 'दूरी सेंसर जुड़ गया है। सेंटीमीटर में रीडिंग आने की प्रतीक्षा है।' : 'Distance sensor connected. Waiting for a centimetre reading.'
+          : speechLanguage === 'hi' ? 'दूरी सेंसर नहीं जुड़ा। सुनिश्चित करें कि सेंसर NaviAble प्रोटोकॉल चला रहा है।' : 'Distance sensor did not connect. Check that it uses the NaviAble sensor protocol.',
+        speechLanguage === 'hi' ? 'hi-IN' : 'en-US',
+      )
+    } finally {
+      setSensorConnecting(false)
+    }
+  }, [speechLanguage])
+
+  const handleDisconnectSensor = useCallback(() => {
+    disconnectBLESensor()
+    setSensorConnected(false)
+    setSensorDistance(null)
+  }, [])
+
+  // Listen for voice assistant camera commands through the same camera flow.
   useEffect(() => {
     const offStart = naviOn('camera:start', () => {
       if (!cameraActive) startCamera()
@@ -513,12 +572,7 @@ export default function Dashboard() {
       offStop()
       offDescribe()
     }
-  }, [cameraActive, startCamera, stopCamera])
-
-  const describeSurroundings = useCallback(() => {
-    const scene = generateSceneDescription(detections, confidence)
-    speak(scene.text)
-  }, [detections, confidence])
+  }, [cameraActive, startCamera, stopCamera, describeSurroundings])
 
   // Cleanup on unmount only (Requirement C)
   useEffect(() => {
@@ -571,7 +625,12 @@ export default function Dashboard() {
           <h1 className="font-display text-3xl md:text-4xl font-bold mb-2">
             AI Vision <span className="gradient-text">Dashboard</span>
           </h1>
-          <p className="text-gray-400">Real-time object detection · {COCO_CLASSES.length} classes · COCO-SSD MobileNet v2</p>
+          <p className="text-gray-400">
+            Live object detection · {COCO_CLASSES.length} supported classes · focused-area alerts
+          </p>
+          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-gray-500">
+            Navi checks the selected camera area, groups the scene into one spoken description, and speaks again when a tracked object approaches or becomes close. Camera range is approximate.
+          </p>
         </motion.div>
 
         {/* Status bar */}
@@ -872,14 +931,46 @@ export default function Dashboard() {
                   </div>
                 )}
 
+                <div className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1" role="group" aria-label="Choose camera scan area">
+                  <button
+                    type="button"
+                    aria-pressed={scanAreaMode === 'focused'}
+                    onClick={() => setScanAreaMode('focused')}
+                    className={`min-h-12 rounded-full px-3 text-xs transition-colors ${scanAreaMode === 'focused' ? 'bg-cyan-500/25 text-cyan-200' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    Focus area
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={scanAreaMode === 'wide'}
+                    onClick={() => setScanAreaMode('wide')}
+                    className={`min-h-12 rounded-full px-3 text-xs transition-colors ${scanAreaMode === 'wide' ? 'bg-cyan-500/25 text-cyan-200' : 'text-gray-400 hover:text-white'}`}
+                  >
+                    Wide view
+                  </button>
+                </div>
+
+                <label className="flex min-h-12 items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 text-xs text-gray-300">
+                  <span>Voice</span>
+                  <select
+                    value={speechLanguage}
+                    onChange={(event) => setSpeechLanguage(event.target.value as SpeechLanguage)}
+                    className="bg-transparent text-white outline-none"
+                    aria-label="Voice language"
+                  >
+                    <option value="hi" className="bg-navy-900">हिन्दी</option>
+                    <option value="en" className="bg-navy-900">English</option>
+                  </select>
+                </label>
+
                 {/* Describe Surroundings */}
                 <button
                   onClick={describeSurroundings}
-                  disabled={!cameraActive || detections.length === 0}
+                  disabled={!cameraActive}
                   className="flex items-center gap-2 px-5 py-2.5 rounded-full font-medium text-sm bg-neon-purple/20 text-neon-purple border border-neon-purple/30 hover:bg-neon-purple/30 disabled:opacity-40 transition-all"
-                  aria-label="Describe surroundings"
+                  aria-label="Describe the selected camera area"
                 >
-                  <AudioLines className="w-4 h-4" /> Describe Surroundings
+                  <AudioLines className="w-4 h-4" /> Describe Area
                 </button>
 
                 {/* Audio Announcements */}
@@ -934,7 +1025,9 @@ export default function Dashboard() {
               )}
 
               {detections.length === 0 && cameraActive && modelStatus === 'ready' && (
-                <p className="text-gray-500 text-sm text-center py-8">No objects detected. Point your camera at objects.</p>
+                <p className="text-gray-500 text-sm text-center py-8">
+                  Nothing clearly identified inside the {scanAreaMode} area. Describe Area will explain this and can include a live sensor reading.
+                </p>
               )}
 
               {!cameraActive && modelStatus === 'ready' && (
@@ -942,7 +1035,21 @@ export default function Dashboard() {
               )}
 
               <div className="space-y-2">
-                {detections.map((d) => (
+                {detections.map((d) => {
+                  const sceneObject = sceneObjects.find((item) => item.detection.id === d.id)
+                  const rangeText = sceneObject?.range === 'close'
+                    ? 'Close · visual estimate'
+                    : sceneObject?.range === 'nearby'
+                      ? 'Nearby · visual estimate'
+                      : sceneObject?.range === 'far'
+                        ? 'Far · visual estimate'
+                        : 'Range not available'
+                  const movementText = sceneObject?.movement === 'approaching'
+                    ? ' · appears closer'
+                    : sceneObject?.movement === 'receding'
+                      ? ' · appears farther'
+                      : ''
+                  return (
                   <div key={d.id} className="bg-white/[0.03] rounded-xl p-3 border border-white/5 hover:border-cyan-400/20 transition-colors">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="font-medium text-sm capitalize">{d.class}</span>
@@ -959,8 +1066,10 @@ export default function Dashboard() {
                       </div>
                       <span className="text-xs text-gray-400 w-10 text-right">{Math.round(d.score * 100)}%</span>
                     </div>
+                    <p className="mt-2 text-[11px] text-gray-400">{rangeText}{movementText}</p>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
 
@@ -984,6 +1093,35 @@ export default function Dashboard() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="glass-card p-4 mt-4 border-cyan-500/15">
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-300">Distance sensor</h4>
+                <span className={`text-[11px] ${sensorConnected ? 'text-green-400' : 'text-gray-500'}`}>
+                  {sensorConnected ? 'Connected' : 'Optional'}
+                </span>
+              </div>
+              <p className="text-xs leading-relaxed text-gray-400 mb-3">
+                {sensorDistance !== null
+                  ? `Hardware reading: ${Math.round(sensorDistance)} cm · Range ${sensorRangeTrend === 'APPROACHING' ? 'decreasing' : sensorRangeTrend === 'RECEDING' ? 'increasing' : sensorRangeTrend === 'STABLE' ? 'steady' : 'trend unavailable'}`
+                  : sensorConnected
+                    ? 'Connected; waiting for a distance reading.'
+                    : 'Camera estimates near or far. A ToF sensor can provide a measured distance.'}
+              </p>
+              <button
+                type="button"
+                onClick={sensorConnected ? handleDisconnectSensor : handleConnectSensor}
+                disabled={sensorConnecting || (!sensorConnected && !isBLESupported())}
+                className="min-h-12 w-full rounded-xl border border-cyan-400/25 bg-cyan-500/10 px-3 text-xs font-medium text-cyan-200 transition-colors hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {sensorConnecting ? 'Connecting…' : sensorConnected ? 'Disconnect sensor' : isBLESupported() ? 'Connect ToF sensor' : 'Bluetooth unavailable'}
+              </button>
+              {!sensorConnected && isBLESupported() && (
+                <p className="mt-2 text-[10px] leading-relaxed text-gray-500">
+                  Works with NaviAble BLE firmware on a secure browser connection.
+                </p>
+              )}
             </div>
             <TestLog />
           </motion.div>

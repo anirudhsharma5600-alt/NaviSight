@@ -418,8 +418,8 @@ export async function recognizeBanknote(
 
     return {
       denomination: topMatch.cls,
-      amount: meta.amount,
-      displayName: meta.displayName,
+      amount: isConfident ? meta.amount : 0,
+      displayName: isConfident ? meta.displayName : 'Unclear',
       confidence: Math.round(topMatch.score * 100),
       colorName: meta.colorName,
       noteTheme: meta.motif,

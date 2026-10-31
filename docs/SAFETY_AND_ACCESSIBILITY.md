@@ -18,6 +18,9 @@ NaviAble AI is an **assistive technology prototype**. It is designed to provide 
 
 ### Proximity Alerts
 - Camera-based proximity estimation uses **bounding box area heuristics** and does not provide exact distances.
+- Live alerts run only on the selected scan region and are rate-limited to target-state changes. A focused region reduces unrelated detections; it does not make the camera model infallible.
+- An object that the detector cannot identify cannot receive a reliable camera-only distance or direction. Navi says when it has no clear identification instead of inventing a measurement.
+- A paired ToF sensor can report a measured distance in its beam only when the connected firmware follows the BLE contract in [HARDWARE_GUIDE.md](HARDWARE_GUIDE.md). The sensor does not identify the object or confirm a safe path.
 - Proximity zones (NEAR, MEDIUM, FAR) are **approximate** and should not be treated as precise measurements.
 - The system cannot detect transparent obstacles (glass doors, windows), very thin objects (wires, cables), or objects outside the camera frame.
 - When an optional hardware distance sensor is connected, readings are more accurate but still limited by the sensor's range and field of view.
@@ -29,6 +32,11 @@ NaviAble AI is an **assistive technology prototype**. It is designed to provide 
 - **Do not use this system for financial verification** or transactions requiring certainty.
 - Accuracy depends on note condition, lighting, camera quality, and model training.
 - The model currently recognizes Indian Rupee denominations only.
+
+### Known People
+- Matching checks a face against profiles the user explicitly saved in the separate Known People mode. It is not general person identification and can still produce a false or missed match.
+- Navi announces only a **possible match**. Do not use it to verify identity, grant access, or make a safety-critical decision.
+- Save photos only with the person's permission. The saved photo, name, and face embedding remain in this browser's local storage until the profile is removed or browser storage is cleared.
 
 ### Road Hazard / Pothole Detection
 - Road hazard detection is **experimental**.
@@ -105,9 +113,10 @@ NaviAble AI is an **assistive technology prototype**. It is designed to provide 
 
 - **No data is uploaded to any server.** All AI processing happens locally in your browser.
 - Camera frames are processed in real-time and never stored or transmitted.
+- Exception: photos deliberately enrolled in Known People are stored locally with their face embeddings until removed; they are not uploaded.
 - No user accounts, tracking, or analytics are implemented.
 - Voice commands are processed by your browser's built-in speech recognition.
-- The only network requests are for loading AI model weights (one-time) and map tiles (OpenStreetMap).
+- Network requests can load object-detection model weights and map tiles (OpenStreetMap). Known People face models are bundled with the app; saved profiles and camera frames are not sent with these requests.
 
 ---
 
@@ -134,6 +143,6 @@ NaviAble AI is an **assistive technology prototype**. It is designed to provide 
 
 - This application is designed to **assist** visually impaired users, not replace professional assistive devices or trained professionals.
 - The AI models used are open-source and freely available.
-- No personal data is collected, stored, or transmitted.
+- No personal data is uploaded. If Known People is used, the user-selected photos, names, and face embeddings are stored only in local browser storage and can be removed from that page.
 - The application follows WCAG 2.1 guidelines where applicable.
 
