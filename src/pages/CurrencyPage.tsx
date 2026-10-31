@@ -6,9 +6,9 @@ import {
   Layers, Layers2, Sparkles, AlertTriangle, Cpu
 } from 'lucide-react'
 import {
-  loadCurrencyModel, recognizeBanknote, recognizeMultipleNotes, getCurrencyModelInfo,
+  loadCurrencyModel, recognizeBanknote, recognizeMultipleNotes, getCurrencyModelInfo, getCurrencyDiagnostics,
   CLASS_METADATA, CURRENCY_CLASSES, CURRENCY_DISCLAIMER,
-  type CurrencyRecognitionResult, type MultiNoteRecognitionResult, type CurrencyModelInfo,
+  type CurrencyRecognitionResult, type MultiNoteRecognitionResult, type CurrencyModelInfo, type CurrencyDiagnosticsData,
 } from '../services/currencyDetection'
 import {
   startCameraFeed, stopCameraFeed, enumerateVideoCameras,
@@ -331,39 +331,89 @@ export default function CurrencyPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5 text-xs">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 text-xs">
+            {/* 1. Currency Model Loaded */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Model Status</span>
-              <span className={`font-semibold capitalize ${modelInfo.status === 'ready' ? 'text-green-400' : 'text-amber-400'}`}>
-                {modelInfo.status}
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Model Loaded</span>
+              <span className={`font-semibold capitalize flex items-center gap-1 ${modelInfo.status === 'ready' ? 'text-green-400' : 'text-amber-400'}`}>
+                {modelInfo.status === 'ready' ? <CheckCircle2 className="w-3.5 h-3.5" /> : null}
+                {modelInfo.status === 'ready' ? 'YES' : 'NO'}
               </span>
             </div>
+
+            {/* 2. Model Name & Version */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5 col-span-2">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Architecture</span>
-              <span className="font-semibold text-white truncate block">{modelInfo.modelName}</span>
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Model & Version</span>
+              <span className="font-semibold text-white truncate block">{modelInfo.modelName} ({modelInfo.modelVersion})</span>
             </div>
+
+            {/* 3. Model Input Size */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Input Dims</span>
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Model Input Size</span>
               <span className="font-mono text-cyan-300">{modelInfo.inputShape}</span>
             </div>
+
+            {/* 4. Camera Frame Received */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Inference</span>
-              <span className={`font-semibold ${isScanning ? 'text-amber-400 animate-pulse' : 'text-green-400'}`}>
-                {isScanning ? 'Inferring...' : modelInfo.lastInferenceMs > 0 ? `${modelInfo.lastInferenceMs}ms` : 'Ready'}
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Frame Received</span>
+              <span className={`font-semibold ${cameraActive ? 'text-green-400' : 'text-gray-400'}`}>
+                {cameraActive ? 'YES' : 'NO'}
               </span>
             </div>
+
+            {/* 5. Note Detected */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Predicted Class</span>
-              <span className="font-mono font-bold text-cyan-400">{modelInfo.lastPredictedClass}</span>
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Note Detected</span>
+              <span className={`font-semibold ${singleResult?.isConfident ? 'text-green-400' : 'text-amber-400'}`}>
+                {singleResult?.isConfident ? 'YES' : 'NO'}
+              </span>
             </div>
+
+            {/* 6. Predicted Denomination */}
+            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Predicted Denom</span>
+              <span className="font-mono font-bold text-cyan-400">
+                {singleResult ? singleResult.displayName : modelInfo.lastPredictedClass !== 'None' ? modelInfo.lastPredictedClass : 'None'}
+              </span>
+            </div>
+
+            {/* 7. Raw Confidence */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
               <span className="text-[10px] text-gray-400 uppercase font-mono block">Raw Confidence</span>
-              <span className="font-mono font-bold text-purple-400">{modelInfo.lastRawConfidence}%</span>
+              <span className="font-mono font-bold text-purple-400">
+                {singleResult ? singleResult.rawConfidence : modelInfo.lastRawConfidence}%
+              </span>
             </div>
+
+            {/* 8. Final Confidence */}
+            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Final Confidence</span>
+              <span className="font-mono font-bold text-emerald-400">
+                {singleResult?.isConfident ? singleResult.confidence : 0}%
+              </span>
+            </div>
+
+            {/* 9. Note Design */}
+            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5 col-span-2">
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Note Design</span>
+              <span className="font-medium text-amber-200 truncate block">
+                {singleResult ? singleResult.note_design : modelInfo.lastNoteDesign}
+              </span>
+            </div>
+
+            {/* 10. Speech Status */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
               <span className="text-[10px] text-gray-400 uppercase font-mono block">Speech Status</span>
               <span className={`font-semibold truncate block ${voiceStatus.lastError ? 'text-red-400' : voiceStatus.isSpeaking ? 'text-cyan-400' : 'text-green-400'}`}>
                 {voiceStatus.lastError ? 'Error' : voiceStatus.isSpeaking ? 'Speaking' : voiceStatus.voiceUnlocked ? 'Unlocked' : 'Locked'}
+              </span>
+            </div>
+
+            {/* 11. Exact Error */}
+            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5 col-span-2 sm:col-span-3 lg:col-span-6">
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Exact Inference / Speech Error</span>
+              <span className={`font-mono text-xs ${voiceStatus.lastError ? 'text-red-400' : 'text-gray-400'}`}>
+                {voiceStatus.lastError ? voiceStatus.lastError : 'None (System Operating Normally)'}
               </span>
             </div>
           </div>
@@ -602,11 +652,16 @@ export default function CurrencyPage() {
                           >
                             {singleResult.isConfident ? singleResult.displayName : 'Uncertain'}
                           </div>
-                          <div className="text-xs font-medium text-gray-300">
+                          <div className="text-xs font-semibold text-emerald-300">
                             {singleResult.isConfident
-                              ? `${singleResult.colorName} · ${singleResult.noteTheme}`
+                              ? singleResult.note_design
                               : 'Banknote not clearly recognised'}
                           </div>
+                          {singleResult.isConfident && (
+                            <div className="text-[11px] text-gray-400 mt-1">
+                              {singleResult.colorName} · Motif: {singleResult.noteTheme}
+                            </div>
+                          )}
                         </div>
 
                         {/* Confidence Meter */}

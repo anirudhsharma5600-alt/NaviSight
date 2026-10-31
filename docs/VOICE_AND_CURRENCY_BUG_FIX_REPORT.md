@@ -102,3 +102,4 @@ NaviAble AI is a **Vite + React Single-Page Application (SPA)**, not Next.js.
    - **Build Command:** `npm run build`
    - **Output Directory:** `dist`
 5. Click **Deploy**.
+

@@ -14,14 +14,16 @@ export type CurrencyDenomination =
 
 export interface CurrencyRecognitionResult {
   denomination: CurrencyDenomination
+  note_design: string
+  recognition_confidence: number // 0 to 1 float
   amount: number
   displayName: string
-  confidence: number
+  confidence: number // 0 to 100 integer
   rawConfidence: number
   colorName: string
   noteTheme: string
   isConfident: boolean
-  uncertainReason?: 'low_contrast' | 'low_confidence' | 'confused_denominations' | 'partial_visible'
+  uncertainReason?: 'low_contrast' | 'low_confidence' | 'confused_denominations' | 'partial_visible' | 'blur_detected'
   spokenFeedback: string
   timestamp: number
   inferenceMs: number
@@ -30,6 +32,7 @@ export interface CurrencyRecognitionResult {
 export interface DetectedNoteItem {
   id: string
   denomination: CurrencyDenomination
+  note_design: string
   amount: number
   displayName: string
   confidence: number
@@ -55,6 +58,7 @@ export type CurrencyModelStatus = 'idle' | 'loading' | 'ready' | 'error'
 export interface CurrencyModelInfo {
   status: CurrencyModelStatus
   modelName: string
+  modelVersion: string
   executionProvider: string
   inputShape: string
   supportedClasses: string[]
@@ -63,6 +67,22 @@ export interface CurrencyModelInfo {
   lastInferenceMs: number
   lastPredictedClass: string
   lastRawConfidence: number
+  lastNoteDesign: string
+}
+
+export interface CurrencyDiagnosticsData {
+  modelLoaded: boolean
+  modelName: string
+  modelVersion: string
+  modelInputSize: string
+  cameraFrameReceived: boolean
+  noteDetected: boolean
+  predictedDenomination: string
+  rawConfidence: number
+  finalConfidence: number
+  noteDesign: string
+  speechStatus: string
+  lastError: string | null
 }
 
 export const CURRENCY_CLASSES: CurrencyDenomination[] = [
@@ -172,11 +192,102 @@ let loadDuration = 0
 let lastInferenceTime = 0
 let lastPredictedClass = 'None'
 let lastRawConfidence = 0
+let lastNoteDesign = 'None'
+let cameraFrameReceived = false
+let noteDetected = false
+let lastInferenceError: string | null = null
 
 // Voice alert debouncing state
 let lastAnnouncedDenomination: string | null = null
 let lastAnnouncementTime = 0
-const ANNOUNCEMENT_DEBOUNCE_MS = 4000
+const ANNOUNCEMENT_DEBOUNCE_MS = 3500
+
+// ─── Note Design Classifier Helper ───
+
+export function determineNoteDesign(
+  cls: CurrencyDenomination,
+  chroma: { r: number; g: number; b: number; contrast: number }
+): { design: string; motif: string; colorName: string } {
+  if (cls === 'INR_500') {
+    // Check if Olive-Yellowish Green (Pre-2016 Mahatma Gandhi Legacy Series with Dandi March)
+    // vs Stone Grey (2016 Mahatma Gandhi New Series with Red Fort)
+    const diffYellowBlue = (chroma.r + chroma.g) / 2 - chroma.b
+    if (diffYellowBlue > 36 || (chroma.r > 120 && chroma.g > 110 && chroma.b < 100)) {
+      return {
+        design: 'Mahatma Gandhi Legacy Series (Olive/Orange)',
+        motif: 'Dandi March / Gyarah Murti',
+        colorName: 'Olive Green & Orange',
+      }
+    }
+    return {
+      design: 'Mahatma Gandhi New Series (Stone Grey)',
+      motif: 'Red Fort, Delhi',
+      colorName: 'Stone Grey',
+    }
+  }
+
+  if (cls === 'INR_100') {
+    // Check if Lavender New Series (Rani ki Vav) vs Blue-Green Legacy Series (Mount Kanchenjunga)
+    if (chroma.b > chroma.r + 6) {
+      return {
+        design: 'Mahatma Gandhi New Series (Lavender)',
+        motif: 'Rani ki Vav',
+        colorName: 'Lavender',
+      }
+    }
+    return {
+      design: 'Mahatma Gandhi Legacy Series (Blue-Green)',
+      motif: 'Mount Kanchenjunga',
+      colorName: 'Blue-Green',
+    }
+  }
+
+  if (cls === 'INR_10') {
+    return {
+      design: 'Mahatma Gandhi New Series (Chocolate Brown)',
+      motif: 'Sun Temple, Konark',
+      colorName: 'Chocolate Brown',
+    }
+  }
+
+  if (cls === 'INR_20') {
+    return {
+      design: 'Mahatma Gandhi New Series (Greenish Yellow)',
+      motif: 'Ellora Caves',
+      colorName: 'Greenish Yellow',
+    }
+  }
+
+  if (cls === 'INR_50') {
+    return {
+      design: 'Mahatma Gandhi New Series (Fluorescent Blue)',
+      motif: 'Hampi with Chariot',
+      colorName: 'Fluorescent Blue',
+    }
+  }
+
+  if (cls === 'INR_200') {
+    return {
+      design: 'Mahatma Gandhi New Series (Bright Yellow-Orange)',
+      motif: 'Sanchi Stupa',
+      colorName: 'Bright Yellow-Orange',
+    }
+  }
+
+  if (cls === 'INR_2000') {
+    return {
+      design: 'Mahatma Gandhi New Series (Magenta)',
+      motif: 'Mangalyaan',
+      colorName: 'Magenta',
+    }
+  }
+
+  return {
+    design: 'Standard Reserve Bank of India Series',
+    motif: CLASS_METADATA[cls as CurrencyDenomination]?.motif || 'Emblem of India',
+    colorName: CLASS_METADATA[cls as CurrencyDenomination]?.colorName || 'Multi-color',
+  }
+}
 
 // ─── Model Lifecycle ───
 
@@ -195,6 +306,7 @@ export async function loadCurrencyModel(): Promise<boolean> {
     if (!headCheck.ok) {
       console.warn('[CurrencyModel] /models/currency/model.onnx not reachable.')
       modelStatus = 'error'
+      lastInferenceError = 'Model file /models/currency/model.onnx not found'
       return false
     }
 
@@ -215,11 +327,13 @@ export async function loadCurrencyModel(): Promise<boolean> {
 
     loadDuration = Math.round(performance.now() - startTime)
     modelStatus = 'ready'
+    lastInferenceError = null
     console.log(`[CurrencyModel] Loaded trained MobileNetV3 in ${loadDuration}ms using: ${executionProvider}`)
     return true
   } catch (err: any) {
     console.error('[CurrencyModel] Initialization failed:', err)
     modelStatus = 'error'
+    lastInferenceError = err.message || 'Failed to initialize ONNX Runtime Web'
     return false
   }
 }
@@ -227,7 +341,8 @@ export async function loadCurrencyModel(): Promise<boolean> {
 export function getCurrencyModelInfo(): CurrencyModelInfo {
   return {
     status: modelStatus,
-    modelName: 'MobileNetV3-Small (7 Indian Rupee Classes, Trained)',
+    modelName: 'MobileNetV3-Small (Indian Currency Multi-Series: Modern + Legacy)',
+    modelVersion: '2.2.0-multiseries',
     executionProvider,
     inputShape: '[1, 3, 224, 224]',
     supportedClasses: CURRENCY_CLASSES.map((c) => CLASS_METADATA[c].displayName),
@@ -236,11 +351,29 @@ export function getCurrencyModelInfo(): CurrencyModelInfo {
     lastInferenceMs: lastInferenceTime,
     lastPredictedClass,
     lastRawConfidence,
+    lastNoteDesign,
   }
 }
 
 export function getCurrencyModelStatus(): CurrencyModelStatus {
   return modelStatus
+}
+
+export function getCurrencyDiagnostics(): CurrencyDiagnosticsData {
+  return {
+    modelLoaded: modelStatus === 'ready',
+    modelName: 'MobileNetV3-Small (Multi-Series)',
+    modelVersion: '2.2.0-multiseries',
+    modelInputSize: '224x224x3 (Float32)',
+    cameraFrameReceived,
+    noteDetected,
+    predictedDenomination: lastPredictedClass,
+    rawConfidence: lastRawConfidence,
+    finalConfidence: noteDetected ? lastRawConfidence : 0,
+    noteDesign: lastNoteDesign,
+    speechStatus: VoiceManager.getStatus().isSpeaking ? 'Speaking' : 'Idle',
+    lastError: lastInferenceError,
+  }
 }
 
 // ─── Image Preprocessing & Orientation-Aware Crop ───
@@ -258,7 +391,11 @@ interface ImageRegion {
 function extractTensorFromRegion(
   videoOrCanvas: HTMLVideoElement | HTMLCanvasElement,
   region?: ImageRegion
-): { tensor: ort.Tensor; chromaticProfile: { r: number; g: number; b: number; contrast: number } } {
+): {
+  tensor: ort.Tensor
+  chromaticProfile: { r: number; g: number; b: number; contrast: number }
+  blurScore: number
+} {
   const canvas = document.createElement('canvas')
   canvas.width = 224
   canvas.height = 224
@@ -279,7 +416,6 @@ function extractTensorFromRegion(
     sh = Math.max(10, Math.min(srcHeight - sy, region.height))
   } else {
     // True Banknote Aspect Ratio Crop (~2.25:1)
-    // Works reliably on both mobile portrait (height > width) and desktop landscape (width >= height)
     if (srcHeight > srcWidth) {
       // Mobile Portrait Viewport
       sw = Math.round(srcWidth * 0.90)
@@ -308,6 +444,9 @@ function extractTensorFromRegion(
   let minBrightness = 255
   let maxBrightness = 0
 
+  // Quick Laplacian gradient calculation for blur estimation
+  let laplacianSum = 0
+
   for (let i = 0; i < totalPixels; i++) {
     const r = pixels[i * 4]
     const g = pixels[i * 4 + 1]
@@ -324,17 +463,25 @@ function extractTensorFromRegion(
     float32Data[i] = (r / 255.0 - IMAGENET_MEAN[0]) / IMAGENET_STD[0]
     float32Data[totalPixels + i] = (g / 255.0 - IMAGENET_MEAN[1]) / IMAGENET_STD[1]
     float32Data[totalPixels * 2 + i] = (b / 255.0 - IMAGENET_MEAN[2]) / IMAGENET_STD[2]
+
+    // Simple horizontal gradient approximation
+    if (i % 224 < 223) {
+      const nextLuma = 0.299 * pixels[(i + 1) * 4] + 0.587 * pixels[(i + 1) * 4 + 1] + 0.114 * pixels[(i + 1) * 4 + 2]
+      laplacianSum += Math.abs(nextLuma - luma)
+    }
   }
 
   const avgR = sumR / totalPixels
   const avgG = sumG / totalPixels
   const avgB = sumB / totalPixels
   const contrast = maxBrightness - minBrightness
+  const blurScore = laplacianSum / totalPixels
 
   const tensor = new ort.Tensor('float32', float32Data, [1, 3, 224, 224])
   return {
     tensor,
     chromaticProfile: { r: avgR, g: avgG, b: avgB, contrast },
+    blurScore,
   }
 }
 
@@ -371,20 +518,25 @@ export async function recognizeBanknote(
   const shouldSpeak = options?.autoSpeak !== false
   const volume = options?.speechVolume ?? 1.0
 
+  cameraFrameReceived = true
+
+  const failSpeech =
+    lang === 'hi'
+      ? 'क्षमा करें, मैं इस नोट को स्पष्ट रूप से नहीं पहचान सका। कृपया पुनः स्कैन करें।'
+      : lang === 'pa'
+      ? 'ਮਾਫ਼ ਕਰਨਾ, ਮੈਂ ਇਸ ਨੋਟ ਨੂੰ ਸਪਸ਼ਟ ਤੌਰ ਤੇ ਨਹੀਂ ਪਛਾਣ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।'
+      : 'Sorry, I cannot recognise this note clearly. Please scan again.'
+
   if (!session || modelStatus !== 'ready') {
     const loaded = await loadCurrencyModel()
     if (!loaded || !session) {
-      const failMsg =
-        lang === 'hi'
-          ? 'क्षमा करें, करेंसी मॉडल लोड नहीं हो सका।'
-          : lang === 'pa'
-          ? 'ਮਾਫ਼ ਕਰਨਾ, ਕਰੰਸੀ ਮਾਡਲ ਲੋਡ ਨਹੀਂ ਹੋ ਸਕਿਆ।'
-          : 'Sorry, I could not recognise this note clearly. Please scan again.'
       if (shouldSpeak) {
-        VoiceManager.announce(failMsg, 'MEDIUM', { force: true, lang })
+        VoiceManager.announce(failSpeech, 'MEDIUM', { force: true, lang })
       }
       return {
         denomination: 'INR_10',
+        note_design: 'Unavailable',
+        recognition_confidence: 0,
         amount: 0,
         displayName: 'Unavailable',
         confidence: 0,
@@ -392,7 +544,7 @@ export async function recognizeBanknote(
         colorName: 'None',
         noteTheme: 'None',
         isConfident: false,
-        spokenFeedback: failMsg,
+        spokenFeedback: failSpeech,
         timestamp: Date.now(),
         inferenceMs: 0,
       }
@@ -400,7 +552,7 @@ export async function recognizeBanknote(
   }
 
   const startInfer = performance.now()
-  const { tensor, chromaticProfile } = extractTensorFromRegion(videoOrCanvas)
+  const { tensor, chromaticProfile, blurScore } = extractTensorFromRegion(videoOrCanvas)
 
   try {
     const feeds: Record<string, ort.Tensor> = { input: tensor }
@@ -426,12 +578,10 @@ export async function recognizeBanknote(
 
     // Secondary multi-cue verification for ambiguous pairs (INR_20 vs INR_200)
     const diffRG = chromaticProfile.r - chromaticProfile.g
-    if ((topMatch.cls === 'INR_20' || topMatch.cls === 'INR_200')) {
+    if (topMatch.cls === 'INR_20' || topMatch.cls === 'INR_200') {
       if (diffRG > 20) {
-        // High red relative to green = Bright Orange-Yellow INR_200
         topMatch = { cls: 'INR_200', prob: Math.max(topMatch.prob, 0.92) }
       } else if (diffRG < 12) {
-        // Balanced green and red = Greenish-Yellow INR_20
         topMatch = { cls: 'INR_20', prob: Math.max(topMatch.prob, 0.94) }
       }
     }
@@ -440,30 +590,26 @@ export async function recognizeBanknote(
     lastRawConfidence = Math.round(topMatch.prob * 100)
 
     const meta = CLASS_METADATA[topMatch.cls]
+    const noteDesignInfo = determineNoteDesign(topMatch.cls, chromaticProfile)
+    lastNoteDesign = noteDesignInfo.design
 
     // Quality & Confidence Evaluation
     let isConfident = true
     let uncertainReason: CurrencyRecognitionResult['uncertainReason'] = undefined
     let spokenText = ''
 
-    if (chromaticProfile.contrast < 38) {
+    if (chromaticProfile.contrast < 35) {
       isConfident = false
       uncertainReason = 'low_contrast'
-      spokenText =
-        lang === 'hi'
-          ? 'क्षमा करें, मैं इस नोट को स्पष्ट रूप से नहीं पहचान सका। कृपया पुनः स्कैन करें।'
-          : lang === 'pa'
-          ? 'ਮਾਫ਼ ਕਰਨਾ, ਮੈਂ ਇਸ ਨੋਟ ਨੂੰ ਸਪਸ਼ਟ ਤੌਰ ਤੇ ਨਹੀਂ ਪਛਾਣ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।'
-          : 'Sorry, I could not recognise this note clearly. Please scan again.'
+      spokenText = failSpeech
+    } else if (blurScore < 2.0 && chromaticProfile.contrast < 45) {
+      isConfident = false
+      uncertainReason = 'blur_detected'
+      spokenText = failSpeech
     } else if (topMatch.prob < 0.48) {
       isConfident = false
       uncertainReason = 'low_confidence'
-      spokenText =
-        lang === 'hi'
-          ? 'क्षमा करें, मैं इस नोट को स्पष्ट रूप से नहीं पहचान सका। कृपया पुनः स्कैन करें।'
-          : lang === 'pa'
-          ? 'ਮਾਫ਼ ਕਰਨਾ, ਮੈਂ ਇਸ ਨੋਟ ਨੂੰ ਸਪਸ਼ਟ ਤੌਰ ਤੇ ਨਹੀਂ ਪਛਾਣ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।'
-          : 'Sorry, I could not recognise this note clearly. Please scan again.'
+      spokenText = failSpeech
     } else if (scoreMargin < 0.10 && topMatch.prob < 0.60) {
       isConfident = false
       uncertainReason = 'confused_denominations'
@@ -477,6 +623,8 @@ export async function recognizeBanknote(
       // High-confidence recognition: exact requested speech format
       spokenText = lang === 'hi' ? meta.spokenHi : lang === 'pa' ? meta.spokenPa : meta.spokenEn
     }
+
+    noteDetected = isConfident
 
     // Voice Announcement Dispatch via Central VoiceAnnouncementManager
     const now = Date.now()
@@ -495,12 +643,14 @@ export async function recognizeBanknote(
 
     return {
       denomination: topMatch.cls,
+      note_design: isConfident ? noteDesignInfo.design : 'Uncertain Note Design',
+      recognition_confidence: Math.round(topMatch.prob * 1000) / 1000,
       amount: isConfident ? meta.amount : 0,
       displayName: isConfident ? meta.displayName : 'Uncertain',
       confidence: Math.round(topMatch.prob * 100),
       rawConfidence: Math.round(topMatch.prob * 100),
-      colorName: meta.colorName,
-      noteTheme: meta.motif,
+      colorName: isConfident ? noteDesignInfo.colorName : meta.colorName,
+      noteTheme: isConfident ? noteDesignInfo.motif : meta.motif,
       isConfident,
       uncertainReason,
       spokenFeedback: spokenText,
@@ -509,13 +659,15 @@ export async function recognizeBanknote(
     }
   } catch (err: any) {
     tensor.dispose()
+    lastInferenceError = err.message || 'Error executing ONNX inference'
     console.error('[CurrencyModel] Inference error:', err)
-    const errText = 'Sorry, I could not recognise this note clearly. Please scan again.'
     if (shouldSpeak && options?.forceAnnouncement) {
-      VoiceManager.announce(errText, 'MEDIUM', { force: true, lang })
+      VoiceManager.announce(failSpeech, 'MEDIUM', { force: true, lang })
     }
     return {
       denomination: 'INR_10',
+      note_design: 'Error',
+      recognition_confidence: 0,
       amount: 0,
       displayName: 'Error',
       confidence: 0,
@@ -523,7 +675,8 @@ export async function recognizeBanknote(
       colorName: 'None',
       noteTheme: 'None',
       isConfident: false,
-      spokenFeedback: errText,
+      uncertainReason: 'low_confidence',
+      spokenFeedback: failSpeech,
       timestamp: Date.now(),
       inferenceMs: 0,
     }
@@ -545,8 +698,34 @@ export async function recognizeMultipleNotes(
   const shouldSpeak = options?.autoSpeak !== false
   const volume = options?.speechVolume ?? 1.0
 
+  cameraFrameReceived = true
+
+  const failSpeech =
+    lang === 'hi'
+      ? 'क्षमा करें, मैं इस नोट को स्पष्ट रूप से नहीं पहचान सका। कृपया पुनः स्कैन करें।'
+      : lang === 'pa'
+      ? 'ਮਾਫ਼ ਕਰਨਾ, ਮੈਂ ਇਸ ਨੋਟ ਨੂੰ ਸਪਸ਼ਟ ਤੌਰ ਤੇ ਨਹੀਂ ਪਛਾਣ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।'
+      : 'Sorry, I cannot recognise this note clearly. Please scan again.'
+
   if (!session || modelStatus !== 'ready') {
-    await loadCurrencyModel()
+    const loaded = await loadCurrencyModel()
+    if (!loaded || !session) {
+      if (shouldSpeak) {
+        VoiceManager.announce(failSpeech, 'MEDIUM', { force: true, lang })
+      }
+      return {
+        mode: 'multi',
+        notes: [],
+        totalAmount: 0,
+        noteCount: 0,
+        breakdown: '0 notes',
+        isConfident: false,
+        overlappingWarning: false,
+        spokenFeedback: failSpeech,
+        timestamp: Date.now(),
+        inferenceMs: 0,
+      }
+    }
   }
 
   const startInfer = performance.now()
@@ -597,6 +776,7 @@ export async function recognizeMultipleNotes(
     confidence: number
     region: ImageRegion
     label: string
+    design: string
   }> = []
 
   let overlappingDetected = false
@@ -604,7 +784,7 @@ export async function recognizeMultipleNotes(
   for (const cand of candidateRegions) {
     const { tensor, chromaticProfile } = extractTensorFromRegion(videoOrCanvas, cand.region)
 
-    if (chromaticProfile.contrast < 40) {
+    if (chromaticProfile.contrast < 36) {
       tensor.dispose()
       continue
     }
@@ -635,12 +815,15 @@ export async function recognizeMultipleNotes(
         }
       }
 
-      if (topProb >= 0.58) {
+      const designInfo = determineNoteDesign(topCls, chromaticProfile)
+
+      if (topProb >= 0.55) {
         detectedCandidates.push({
           denomination: topCls,
           confidence: topProb,
           region: cand.region,
           label: cand.label,
+          design: designInfo.design,
         })
       }
     } catch {
@@ -689,6 +872,7 @@ export async function recognizeMultipleNotes(
       finalNotes.push({
         id: `note-${i}-${Date.now()}`,
         denomination: itemA.denomination,
+        note_design: itemA.design,
         amount: meta.amount,
         displayName: meta.displayName,
         confidence: Math.round(itemA.confidence * 100),
@@ -719,12 +903,7 @@ export async function recognizeMultipleNotes(
         ? 'ਨੋਟ ਇੱਕ ਦੂਜੇ ਦੇ ਉੱਪਰ ਰੱਖੇ ਜਾਪਦੇ ਹਨ। ਕਿਰਪਾ ਕਰਕੇ ਉਹਨਾਂ ਨੂੰ ਵੱਖ-ਵੱਖ ਰੱਖੋ ਅਤੇ ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।'
         : 'Notes appear to be overlapping. Please place them apart and scan again.'
   } else if (noteCount === 0) {
-    spokenText =
-      lang === 'hi'
-        ? 'कैमरा फ्रेम में कोई नोट नहीं पहचाना गया। कृपया पुनः स्कैन करें।'
-        : lang === 'pa'
-        ? 'ਕੈਮਰਾ ਫਰੇਮ ਵਿੱਚ ਕੋਈ ਨੋਟ ਨਹੀਂ ਪਛਾਣਿਆ ਗਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।'
-        : 'Sorry, I could not recognise this note clearly. Please scan again.'
+    spokenText = failSpeech
   } else if (noteCount === 1) {
     spokenText =
       lang === 'hi'

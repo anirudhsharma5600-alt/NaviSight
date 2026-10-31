@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 """
 NaviAble AI — High-Accuracy Indian Currency Recognition Training & Evaluation Pipeline
-Fine-tunes MobileNetV3-Small on the curated 7-class Indian banknote dataset and exports to ONNX.
+Fine-tunes MobileNetV3-Small on the curated 7-class Indian banknote dataset (Modern + Legacy series)
+and exports directly to standalone ONNX format for ONNX Runtime Web.
 """
 
 import os
 import sys
+
+# Ensure UTF-8 output encoding on Windows console
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 import time
 import json
 import numpy as np
@@ -115,7 +123,7 @@ def evaluate_metrics(model, dataloader, device):
     accuracy = float(round((all_preds == all_labels).mean(), 4))
     return accuracy, conf_matrix, metrics
 
-def train(epochs=12, batch_size=32, lr=5e-4):
+def train(epochs=6, batch_size=32, lr=5e-4):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"[INFO] Using training device: {device}")
     
@@ -164,7 +172,7 @@ def train(epochs=12, batch_size=32, lr=5e-4):
         
         print(f"Epoch {epoch:02d}/{epochs:02d} [{elapsed:.1f}s] - Train Loss: {train_loss:.4f} Acc: {train_acc*100:.2f}% | Val Acc: {val_acc*100:.2f}%")
         
-        if val_acc > best_val_acc:
+        if val_acc >= best_val_acc:
             best_val_acc = val_acc
             best_weights = {k: v.cpu().clone() for k, v in model.state_dict().items()}
             
@@ -172,12 +180,17 @@ def train(epochs=12, batch_size=32, lr=5e-4):
     if best_weights:
         model.load_state_dict(best_weights)
         
+    # Save PyTorch weights
+    pth_path = os.path.join(os.path.dirname(__file__), 'currency_mobilenetv3_best.pth')
+    torch.save(best_weights, pth_path)
+    print(f"[SAVED] Saved best PyTorch weights to: {pth_path}")
+        
     print("\n--- Independent Test Set Evaluation ---")
     test_acc, conf_mat, test_metrics = evaluate_metrics(model, test_loader, device)
     print(f"Independent Test Accuracy: {test_acc*100:.2f}%\n")
     print("Per-Denomination Performance:")
     for cls_name, m in test_metrics.items():
-        print(f"  {cls_name.padEnd if hasattr(cls_name, 'padEnd') else cls_name:<10} | Precision: {m['precision']*100:.1f}% | Recall: {m['recall']*100:.1f}% | F1: {m['f1']*100:.1f}% (Support: {m['support']})")
+        print(f"  {cls_name:<10} | Precision: {m['precision']*100:.1f}% | Recall: {m['recall']*100:.1f}% | F1: {m['f1']*100:.1f}% (Support: {m['support']})")
         
     print("\nConfusion Matrix (Rows=True, Cols=Predicted):")
     header = "       " + " ".join([f"{c:>7}" for c in CLASSES])
@@ -207,7 +220,7 @@ def train(epochs=12, batch_size=32, lr=5e-4):
         json.dump(report, f, indent=2)
     print(f"\n[SAVED] Training report saved to: {report_path}")
     
-    # Export to ONNX
+    # Export to ONNX using legacy TorchScript exporter (no dynamo emoji printing bugs)
     onnx_dest = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'public', 'models', 'currency', 'model.onnx'))
     os.makedirs(os.path.dirname(onnx_dest), exist_ok=True)
     print(f"[INFO] Exporting trained model to ONNX: {onnx_dest}")
@@ -215,17 +228,30 @@ def train(epochs=12, batch_size=32, lr=5e-4):
     model.to('cpu')
     dummy_input = torch.randn(1, 3, 224, 224)
     
-    torch.onnx.export(
-        model,
-        dummy_input,
-        onnx_dest,
-        export_params=True,
-        opset_version=14,
-        do_constant_folding=True,
-        input_names=['input'],
-        output_names=['output'],
-        dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
-    )
+    try:
+        torch.onnx.export(
+            model,
+            dummy_input,
+            onnx_dest,
+            export_params=True,
+            opset_version=14,
+            do_constant_folding=True,
+            input_names=['input'],
+            output_names=['output'],
+            dynamo=False
+        )
+    except Exception as e:
+        print(f"[FALLBACK] Exporting without dynamo parameter: {e}")
+        torch.onnx.export(
+            model,
+            dummy_input,
+            onnx_dest,
+            export_params=True,
+            opset_version=14,
+            do_constant_folding=True,
+            input_names=['input'],
+            output_names=['output']
+        )
     
     size_mb = os.path.getsize(onnx_dest) / (1024 * 1024)
     print(f"[SUCCESS] ONNX model exported successfully ({size_mb:.2f} MB)")
@@ -238,5 +264,4 @@ def train(epochs=12, batch_size=32, lr=5e-4):
         print(f"[INFO] Synced ONNX model to dist build folder: {dist_dest}")
 
 if __name__ == '__main__':
-    train(epochs=12, batch_size=32, lr=5e-4)
-
+    train(epochs=6, batch_size=32, lr=5e-4)

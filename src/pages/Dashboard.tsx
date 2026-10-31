@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera as CameraIcon, CameraOff, Volume2, VolumeX, Eye, Loader2,
   AlertCircle, AudioLines, Settings2, SlidersHorizontal,
-  RefreshCw, SwitchCamera, Activity, CheckCircle2, XCircle, Info
+  RefreshCw, SwitchCamera, Activity, CheckCircle2, XCircle, Info,
+  Banknote, X
 } from 'lucide-react'
 import {
   loadModel, detectObjects, isModelLoaded, getModelStatus,
@@ -22,6 +23,9 @@ import {
 } from '../services/proximityEngine'
 import { VoiceManager, type AudioOperatingMode } from '../services/VoiceAnnouncementManager'
 import { PersonTracker } from '../services/PersonAnnouncementTracker'
+import {
+  recognizeBanknote, loadCurrencyModel, type CurrencyRecognitionResult,
+} from '../services/currencyDetection'
 
 // ─── Helper for readyState text ───
 function getReadyStateDescription(state: number): string {
@@ -75,6 +79,31 @@ export default function Dashboard() {
     errorMessage: '',
     apiAvailable: typeof navigator !== 'undefined' && !!navigator.mediaDevices && !!navigator.mediaDevices.getUserMedia,
   })
+
+  // Auto-read Indian Currency state in Vision tab (Requirement 1)
+  const [autoReadCurrency, setAutoReadCurrency] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('naviable_auto_currency') === 'true'
+    }
+    return false
+  })
+  const [isVisionCurrencyScanning, setIsVisionCurrencyScanning] = useState(false)
+  const [visionCurrencyToast, setVisionCurrencyToast] = useState<{
+    denomination: string
+    amount: number
+    confidence: number
+    note_design: string
+    timestamp: number
+  } | null>(null)
+  const lastCurrencyCheckTime = useRef(0)
+  const isCurrencyScanningRef = useRef(false)
+  const lastAnnouncedCurrencyDenom = useRef<string | null>(null)
+  const lastCurrencyAnnouncementTime = useRef(0)
+
+  // Pre-load dedicated currency model in background
+  useEffect(() => {
+    loadCurrencyModel().catch(() => {})
+  }, [])
 
   // Subscribe to model status changes
   useEffect(() => {
@@ -212,6 +241,40 @@ export default function Dashboard() {
             generalNarrationEnabled: audioEnabled,
           })
         }
+
+        // Auto-read Indian Currency when enabled (Throttled to every 1800ms)
+        // Dedicated currency classifier runs independently without interrupting proximity warnings
+        if (autoReadCurrency && now - lastCurrencyCheckTime.current > 1800 && !isCurrencyScanningRef.current) {
+          lastCurrencyCheckTime.current = now
+          isCurrencyScanningRef.current = true
+          recognizeBanknote(video, { autoSpeak: false })
+            .then(res => {
+              isCurrencyScanningRef.current = false
+              if (res && res.isConfident && res.amount > 0) {
+                const timeSinceLast = now - lastCurrencyAnnouncementTime.current
+                const isNewNote = lastAnnouncedCurrencyDenom.current !== res.denomination
+                if (isNewNote || timeSinceLast > 5000) {
+                  lastCurrencyAnnouncementTime.current = now
+                  lastAnnouncedCurrencyDenom.current = res.denomination
+                  // Announce with MEDIUM priority (will NEVER interrupt HIGH priority proximity collision warnings)
+                  VoiceManager.announce(res.spokenFeedback, 'MEDIUM')
+                  setVisionCurrencyToast({
+                    denomination: res.displayName,
+                    amount: res.amount,
+                    confidence: res.confidence,
+                    note_design: res.note_design,
+                    timestamp: Date.now(),
+                  })
+                  setTimeout(() => {
+                    setVisionCurrencyToast(prev => (prev && Date.now() - prev.timestamp >= 4000 ? null : prev))
+                  }, 4500)
+                }
+              }
+            })
+            .catch(() => {
+              isCurrencyScanningRef.current = false
+            })
+        }
       } catch {
         // skip frame on error
       }
@@ -219,7 +282,7 @@ export default function Dashboard() {
     }
 
     animationRef.current = requestAnimationFrame(detectLoop)
-  }, [cameraActive, drawDetections, detectionInterval, audioEnabled])
+  }, [cameraActive, drawDetections, detectionInterval, audioEnabled, autoReadCurrency])
 
   // Start/stop detection loop
   useEffect(() => {
@@ -512,6 +575,36 @@ export default function Dashboard() {
     const scene = generateSceneDescription(detections, confidence)
     speak(scene.text)
   }, [detections, confidence])
+
+  // Explicit Scan Currency action in Vision screen (Requirement 1)
+  const handleScanCurrencyInVision = useCallback(async () => {
+    const video = videoRef.current
+    if (!video || !cameraActive) return
+    setIsVisionCurrencyScanning(true)
+    VoiceManager.unlockVoice()
+    try {
+      const res = await recognizeBanknote(video, {
+        forceAnnouncement: true,
+        autoSpeak: true,
+      })
+      if (res && res.isConfident && res.amount > 0) {
+        setVisionCurrencyToast({
+          denomination: res.displayName,
+          amount: res.amount,
+          confidence: res.confidence,
+          note_design: res.note_design,
+          timestamp: Date.now(),
+        })
+        setTimeout(() => {
+          setVisionCurrencyToast(prev => (prev && Date.now() - prev.timestamp >= 4000 ? null : prev))
+        }, 5000)
+      }
+    } catch (err: any) {
+      console.error('[Vision] Currency scan error:', err)
+    } finally {
+      setIsVisionCurrencyScanning(false)
+    }
+  }, [cameraActive])
 
   // Cleanup on unmount only (Requirement C)
   useEffect(() => {
@@ -808,6 +901,40 @@ export default function Dashboard() {
                     <span className="text-white text-xs font-bold tracking-wider">LIVE</span>
                   </div>
                 )}
+
+                {/* Currency Recognition Toast Notification in Vision */}
+                <AnimatePresence>
+                  {visionCurrencyToast && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -20, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                      className="absolute top-3 right-3 left-auto z-30 max-w-sm bg-[#0a0e1a]/95 backdrop-blur-xl border border-emerald-500/40 rounded-xl p-3 shadow-2xl flex items-center justify-between text-white"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center font-bold text-emerald-300 text-sm">
+                          ₹
+                        </div>
+                        <div>
+                          <div className="font-semibold text-emerald-300 flex items-center gap-1.5 text-xs">
+                            <span>{visionCurrencyToast.denomination} Banknote</span>
+                            <span className="text-[10px] font-normal px-1.5 py-0.2 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-200">
+                              {visionCurrencyToast.confidence}%
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-300 truncate max-w-[200px]">{visionCurrencyToast.note_design}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setVisionCurrencyToast(null)}
+                        className="text-gray-400 hover:text-white p-1 rounded-lg ml-2"
+                        aria-label="Dismiss banner"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* ─── E. CAMERA CONTROLS ─── */}
@@ -873,6 +1000,39 @@ export default function Dashboard() {
                   aria-label="Describe surroundings"
                 >
                   <AudioLines className="w-4 h-4" /> Describe Surroundings
+                </button>
+
+                {/* Scan Currency Button (Requirement 1) */}
+                <button
+                  onClick={handleScanCurrencyInVision}
+                  disabled={!cameraActive || isVisionCurrencyScanning}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-full font-medium text-sm bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 hover:bg-emerald-500/30 disabled:opacity-40 transition-all shadow-sm shadow-emerald-500/10"
+                  aria-label="Scan Indian banknote in Vision screen"
+                >
+                  <Banknote className="w-4 h-4 text-emerald-400" />
+                  {isVisionCurrencyScanning ? 'Scanning...' : 'Scan Currency (₹)'}
+                </button>
+
+                {/* Auto-read Currency Toggle (Requirement 1) */}
+                <button
+                  onClick={() => {
+                    setAutoReadCurrency(prev => {
+                      const next = !prev
+                      if (typeof window !== 'undefined') {
+                        localStorage.setItem('naviable_auto_currency', String(next))
+                      }
+                      return next
+                    })
+                  }}
+                  className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-medium border transition-all ${
+                    autoReadCurrency
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-400/40 shadow-sm shadow-emerald-500/10'
+                      : 'bg-white/5 text-gray-400 border-white/10 hover:text-gray-300'
+                  }`}
+                  title="Automatically read Indian banknotes shown to camera"
+                >
+                  <Banknote className={`w-3.5 h-3.5 ${autoReadCurrency ? 'text-emerald-400' : 'text-gray-500'}`} />
+                  Auto-read Currency: {autoReadCurrency ? 'ON' : 'OFF'}
                 </button>
 
                 {/* Audio Announcements */}

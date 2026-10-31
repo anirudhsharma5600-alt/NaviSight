@@ -329,3 +329,4 @@ class VoiceAnnouncementManagerClass {
 }
 
 export const VoiceManager = new VoiceAnnouncementManagerClass()
+

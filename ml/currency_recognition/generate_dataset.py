@@ -1,7 +1,7 @@
 import os
 import random
 import glob
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter
 import numpy as np
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -11,7 +11,7 @@ DATASET_DIR = os.path.join(BASE_DIR, 'dataset')
 CLASSES = ['10', '20', '50', '100', '200', '500', '2000']
 
 # Target splits
-NUM_TRAIN_PER_CLASS = 200
+NUM_TRAIN_PER_CLASS = 220
 NUM_VAL_PER_CLASS = 30
 NUM_TEST_PER_CLASS = 30
 
@@ -80,9 +80,9 @@ def augment_banknote(raw_img: Image.Image, out_size=(224, 224), is_test=False) -
     s_factor = random.uniform(0.85, 1.20)
     rgb_note = ImageEnhance.Color(rgb_note).enhance(s_factor)
     
-    # Camera blur / defocus simulation (10% chance)
-    if random.random() < 0.15:
-        rgb_note = rgb_note.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.5, 1.2)))
+    # Camera blur / defocus simulation (12% chance)
+    if random.random() < 0.12:
+        rgb_note = rgb_note.filter(ImageFilter.GaussianBlur(radius=random.uniform(0.4, 1.0)))
         
     # Recombine alpha
     note = Image.merge('RGBA', (*rgb_note.split(), note.split()[3]))
@@ -113,31 +113,44 @@ def main():
             os.makedirs(os.path.join(DATASET_DIR, split, cls), exist_ok=True)
             
     for cls in CLASSES:
-        obv_path = glob.glob(os.path.join(RAW_DIR, f"{cls}_obverse.*"))[0]
-        rev_path = glob.glob(os.path.join(RAW_DIR, f"{cls}_reverse.*"))[0]
-        
-        obv_img = Image.open(obv_path)
-        rev_img = Image.open(rev_path)
-        
-        print(f"[PROCESSING] Class INR_{cls} (Obverse: {obv_img.size}, Reverse: {rev_img.size})")
-        
+        # Find all raw samples for this denomination (both modern and older/legacy designs)
+        raw_files = []
+        for f in os.listdir(RAW_DIR):
+            name, ext = os.path.splitext(f)
+            if ext.lower() in ['.jpg', '.jpeg', '.png']:
+                # Match patterns: '500_obverse', '500_reverse', '500_old_obverse', '500_old_reverse'
+                parts = name.split('_')
+                if parts[0] == cls:
+                    raw_files.append(os.path.join(RAW_DIR, f))
+                    
+        if not raw_files:
+            print(f"[WARN] No raw samples found for class {cls}!")
+            continue
+            
+        print(f"[PROCESSING] Class INR_{cls} with {len(raw_files)} raw design templates:")
+        loaded_imgs = []
+        for rf in sorted(raw_files):
+            img = Image.open(rf)
+            loaded_imgs.append(img)
+            print(f"   • {os.path.basename(rf)}: {img.size}")
+            
         # Train Split
         for i in range(NUM_TRAIN_PER_CLASS):
-            raw = obv_img if (i % 2 == 0) else rev_img
+            raw = loaded_imgs[i % len(loaded_imgs)]
             aug = augment_banknote(raw, out_size=(224, 224), is_test=False)
             out_file = os.path.join(DATASET_DIR, 'train', cls, f"note_{cls}_tr_{i:04d}.jpg")
             aug.save(out_file, 'JPEG', quality=90)
             
         # Val Split
         for i in range(NUM_VAL_PER_CLASS):
-            raw = obv_img if (i % 2 == 0) else rev_img
+            raw = loaded_imgs[i % len(loaded_imgs)]
             aug = augment_banknote(raw, out_size=(224, 224), is_test=False)
             out_file = os.path.join(DATASET_DIR, 'val', cls, f"note_{cls}_val_{i:04d}.jpg")
             aug.save(out_file, 'JPEG', quality=92)
             
         # Test Split (Independent evaluation)
         for i in range(NUM_TEST_PER_CLASS):
-            raw = obv_img if (i % 2 == 0) else rev_img
+            raw = loaded_imgs[i % len(loaded_imgs)]
             aug = augment_banknote(raw, out_size=(224, 224), is_test=True)
             out_file = os.path.join(DATASET_DIR, 'test', cls, f"note_{cls}_test_{i:04d}.jpg")
             aug.save(out_file, 'JPEG', quality=95)
@@ -145,11 +158,11 @@ def main():
     total_train = NUM_TRAIN_PER_CLASS * len(CLASSES)
     total_val = NUM_VAL_PER_CLASS * len(CLASSES)
     total_test = NUM_TEST_PER_CLASS * len(CLASSES)
-    print(f"\n[SUCCESS] Dataset generated successfully:")
+    print(f"\n[SUCCESS] Multi-Series Dataset generated successfully:")
     print(f"  • Train: {total_train} images ({NUM_TRAIN_PER_CLASS} per class)")
     print(f"  • Val:   {total_val} images ({NUM_VAL_PER_CLASS} per class)")
     print(f"  • Test:  {total_test} images ({NUM_TEST_PER_CLASS} per class)")
-    print(f"  • Total: {total_train + total_val + total_test} images across {len(CLASSES)} denominations")
+    print(f"  • Total: {total_train + total_val + total_test} images across {len(CLASSES)} denominations (modern + legacy)")
 
 if __name__ == '__main__':
     main()
