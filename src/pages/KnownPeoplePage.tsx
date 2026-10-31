@@ -59,7 +59,13 @@ export default function KnownPeoplePage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
-  const lastMatchRef = useRef<{ id: string | null; frames: number; spokenAt: number }>({ id: null, frames: 0, spokenAt: 0 })
+  const lastMatchRef = useRef<{
+    id: string | null
+    hits: number[]
+    misses: number
+    announcedId: string | null
+    spokenAt: number
+  }>({ id: null, hits: [], misses: 0, announcedId: null, spokenAt: 0 })
   const [profiles, setProfiles] = useState<KnownPersonProfile[]>([])
   const [name, setName] = useState('')
   const [photoFile, setPhotoFile] = useState<File | null>(null)
@@ -154,7 +160,7 @@ export default function KnownPeoplePage() {
     if (videoRef.current) videoRef.current.srcObject = null
     setCameraActive(false)
     setLiveStatus('Family matching is off.')
-    lastMatchRef.current = { id: null, frames: 0, spokenAt: 0 }
+    lastMatchRef.current = { id: null, hits: [], misses: 0, announcedId: null, spokenAt: 0 }
     stopSpeaking()
   }
 
@@ -162,28 +168,44 @@ export default function KnownPeoplePage() {
     if (!cameraActive || !videoRef.current || profiles.length === 0) return
     let inFlight = false
     let stopped = false
-    const timer = window.setInterval(async () => {
+    let timer = 0
+    const scanOneFrame = async () => {
       const video = videoRef.current
-      if (inFlight || !video || video.readyState < 2) return
+      if (stopped) return
+      if (inFlight || !video || video.readyState < 2) {
+        timer = window.setTimeout(() => { void scanOneFrame() }, 250)
+        return
+      }
       inFlight = true
       try {
         const match = await findKnownFace(video, profiles)
         if (stopped) return
         if (match.profile) {
-          const samePerson = lastMatchRef.current.id === match.profile.id
-          const frames = samePerson ? lastMatchRef.current.frames + 1 : 1
+          const now = Date.now()
+          const previous = lastMatchRef.current
+          const samePerson = previous.id === match.profile.id
+          const previousHitExpired = samePerson && previous.hits.length > 0 && now - previous.hits[previous.hits.length - 1] > 6000
+          const hits = (samePerson ? previous.hits : []).filter((time) => now - time <= 6000)
+          hits.push(now)
           lastMatchRef.current = {
+            ...previous,
             id: match.profile.id,
-            frames,
-            spokenAt: lastMatchRef.current.spokenAt,
+            hits,
+            misses: 0,
+            announcedId: previousHitExpired ? null : previous.announcedId,
           }
           setLiveStatus(`Possible saved match: ${match.profile.name} · ${Math.round(match.similarity * 100)}% similarity`)
-          if (frames === 3 && Date.now() - lastMatchRef.current.spokenAt >= 4500) {
-            lastMatchRef.current.spokenAt = Date.now()
+          if (hits.length >= 2 && lastMatchRef.current.announcedId !== match.profile.id && now - lastMatchRef.current.spokenAt >= 4500) {
+            lastMatchRef.current.announcedId = match.profile.id
+            lastMatchRef.current.spokenAt = now
             speak(`सहेजी हुई तस्वीर से संभवतः ${match.profile.name} का मिलान है।`, 'hi-IN')
           }
         } else {
-          lastMatchRef.current = { id: null, frames: 0, spokenAt: lastMatchRef.current.spokenAt }
+          const previous = lastMatchRef.current
+          const misses = previous.misses + 1
+          lastMatchRef.current = misses >= 3
+            ? { ...previous, id: null, hits: [], misses: 0, announcedId: null }
+            : { ...previous, misses }
           if (match.faceCount > 1) {
             setLiveStatus('More than one face is visible. Only one face can be matched at a time.')
           } else if (match.faceCount === 1) {
@@ -199,12 +221,15 @@ export default function KnownPeoplePage() {
         }
       } finally {
         inFlight = false
+        if (!stopped) timer = window.setTimeout(() => { void scanOneFrame() }, 500)
       }
-    }, 1000)
+    }
+
+    timer = window.setTimeout(() => { void scanOneFrame() }, 200)
 
     return () => {
       stopped = true
-      window.clearInterval(timer)
+      window.clearTimeout(timer)
     }
   }, [cameraActive, profiles])
 

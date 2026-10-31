@@ -29,7 +29,7 @@ import { VoiceManager, type AudioOperatingMode } from '../services/VoiceAnnounce
 import { PersonTracker } from '../services/PersonAnnouncementTracker'
 import { RoadIntelligence } from '../services/roadIntelligence'
 import {
-  recognizeBanknote, loadCurrencyModel, type CurrencyRecognitionResult,
+  recognizeStableBanknote, loadCurrencyModel, type CurrencyRecognitionResult,
 } from '../services/currencyDetection'
 import { NaviToolRouter } from '../assistant/NaviToolRouter'
 import { NaviLiveSession } from '../assistant/NaviLiveSession'
@@ -73,6 +73,11 @@ export default function Dashboard() {
   const [sensorConnected, setSensorConnected] = useState(isBLESensorConnected())
   const [sensorDistance, setSensorDistance] = useState<number | null>(getSensorDistance())
   const [sensorRangeTrend, setSensorRangeTrend] = useState(getSensorRangeTrend())
+  const sensorAlertStateRef = useRef<{
+    band: 'unknown' | 'far' | 'nearby' | 'close' | 'critical'
+    trend: ReturnType<typeof getSensorRangeTrend>
+    lastAnnouncedAt: number
+  }>({ band: 'unknown', trend: 'UNKNOWN', lastAnnouncedAt: 0 })
   const [sensorConnecting, setSensorConnecting] = useState(false)
   const [audioMode, setAudioMode] = useState<AudioOperatingMode>(VoiceManager.getMode())
   const [fps, setFps] = useState(0)
@@ -119,6 +124,7 @@ export default function Dashboard() {
   const lastCurrencyCheckTime = useRef(0)
   const isCurrencyScanningRef = useRef(false)
   const objectDetectionBusyRef = useRef(false)
+  const knownPersonAnalysisBusyRef = useRef(false)
   const lastAnnouncedCurrencyDenom = useRef<string | null>(null)
   const lastCurrencyAnnouncementTime = useRef(0)
   const lastCurrencyStatusKey = useRef<string | null>(null)
@@ -127,9 +133,14 @@ export default function Dashboard() {
   const reportKnownPersonStatus = useCallback((status: string) => {
     setKnownPersonStatus(status)
   }, [])
-  const canRunKnownPersonAnalysis = useCallback(() =>
-    !objectDetectionBusyRef.current && !isCurrencyScanningRef.current,
-  [])
+  const beginKnownPersonAnalysis = useCallback(() => {
+    if (objectDetectionBusyRef.current || isCurrencyScanningRef.current || knownPersonAnalysisBusyRef.current) return false
+    knownPersonAnalysisBusyRef.current = true
+    return true
+  }, [])
+  const endKnownPersonAnalysis = useCallback(() => {
+    knownPersonAnalysisBusyRef.current = false
+  }, [])
 
   const handleCameraInterrupted = useCallback((stream: MediaStream, message: string) => {
     if (streamRef.current !== stream) return
@@ -367,7 +378,11 @@ export default function Dashboard() {
     }
 
     const now = performance.now()
-    if (now - lastDetectionTime.current > detectionInterval) {
+    if (
+      now - lastDetectionTime.current > detectionInterval &&
+      !isCurrencyScanningRef.current &&
+      !knownPersonAnalysisBusyRef.current
+    ) {
       const start = performance.now()
       objectDetectionBusyRef.current = true
       try {
@@ -410,9 +425,13 @@ export default function Dashboard() {
         if (autoReadCurrency && now - lastCurrencyCheckTime.current > 1800 && !isCurrencyScanningRef.current) {
           lastCurrencyCheckTime.current = now
           isCurrencyScanningRef.current = true
-          recognizeBanknote(video, { autoSpeak: false, language: speechLanguage })
+          recognizeStableBanknote(video, { autoSpeak: false, language: speechLanguage })
             .then(res => {
               isCurrencyScanningRef.current = false
+              // Start the next auto-read delay after inference completes. A
+              // three-frame confirmation must not starve object/face analysis
+              // on a slower phone by immediately launching another scan.
+              lastCurrencyCheckTime.current = performance.now()
               if (session !== detectionSessionRef.current) return
               if (
                 res &&
@@ -421,10 +440,11 @@ export default function Dashboard() {
                 res.amount > 0 &&
                 res.denomination !== 'NEGATIVE'
               ) {
-                const timeSinceLast = now - lastCurrencyAnnouncementTime.current
+                const currencyReadAt = performance.now()
+                const timeSinceLast = currencyReadAt - lastCurrencyAnnouncementTime.current
                 const isNewNote = lastAnnouncedCurrencyDenom.current !== res.denomination
                 if (isNewNote || timeSinceLast > 5000) {
-                  lastCurrencyAnnouncementTime.current = now
+                  lastCurrencyAnnouncementTime.current = currencyReadAt
                   lastAnnouncedCurrencyDenom.current = res.denomination
                   lastCurrencyStatusKey.current = null
                   // Announce with MEDIUM priority (will NEVER interrupt HIGH priority proximity collision warnings)
@@ -467,6 +487,7 @@ export default function Dashboard() {
             })
             .catch(() => {
               isCurrencyScanningRef.current = false
+              lastCurrencyCheckTime.current = performance.now()
             })
         }
       } catch {
@@ -513,12 +534,58 @@ export default function Dashboard() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setSensorConnected(isBLESensorConnected())
-      setSensorDistance(getSensorDistance())
-      setSensorRangeTrend(getSensorRangeTrend())
+      const connected = isBLESensorConnected()
+      const distance = getSensorDistance()
+      const trend = getSensorRangeTrend()
+      setSensorConnected(connected)
+      setSensorDistance(distance)
+      setSensorRangeTrend(trend)
+
+      if (!connected || distance === null) {
+        sensorAlertStateRef.current.band = 'unknown'
+        sensorAlertStateRef.current.trend = 'UNKNOWN'
+        sensorAlertStateRef.current.lastAnnouncedAt = 0
+        return
+      }
+
+      const band = distance <= 50 ? 'critical' : distance <= 120 ? 'close' : distance <= 250 ? 'nearby' : 'far'
+      const riskRank = { unknown: 0, far: 0, nearby: 1, close: 2, critical: 3 } as const
+      const previous = sensorAlertStateRef.current
+      const enteredCloserBand = riskRank[band] > riskRank[previous.band]
+      const approachStarted = trend === 'APPROACHING' && previous.trend !== 'APPROACHING' && band !== 'far'
+      const recessionStarted = trend === 'RECEDING' && previous.trend !== 'RECEDING' && band !== 'far'
+      const isUrgent = band === 'critical'
+      const cooldownElapsed = Date.now() - previous.lastAnnouncedAt >= 6500
+
+      if (
+        (enteredCloserBand || approachStarted || recessionStarted) &&
+        (cooldownElapsed || (isUrgent && enteredCloserBand))
+      ) {
+        const distanceText = speechLanguage === 'hi'
+          ? `${Math.round(distance)} सेंटीमीटर`
+          : `${Math.round(distance)} centimetres`
+        const trendText = trend === 'APPROACHING'
+          ? speechLanguage === 'hi' ? 'दूरी घट रही है।' : 'The reading is decreasing.'
+          : trend === 'RECEDING'
+            ? speechLanguage === 'hi' ? 'दूरी बढ़ रही है।' : 'The reading is increasing.'
+            : ''
+        const message = speechLanguage === 'hi'
+          ? `दूरी सेंसर की किरण के सामने कुछ लगभग ${distanceText} दूर है। ${trendText ? `${trendText} ` : ''}सेंसर वस्तु का नाम नहीं पहचानता।`
+          : `The distance sensor detects something about ${distanceText} away in its beam. ${trendText ? `${trendText} ` : ''}It does not identify the object.`
+        const spoken = VoiceManager.announce(message, isUrgent ? 'HIGH' : 'MEDIUM', {
+          lang: speechLanguage,
+          cooldownMs: 6500,
+          domain: 'proximity',
+          force: isUrgent,
+        })
+        if (spoken) previous.lastAnnouncedAt = Date.now()
+      }
+
+      previous.band = band
+      previous.trend = trend
     }, 400)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [speechLanguage])
 
   // ─── A. CAMERA INITIALIZATION & B. VIDEO RENDERING ───
   const startCamera = useCallback(async (targetDeviceId?: string) => {
@@ -874,7 +941,7 @@ export default function Dashboard() {
     setIsVisionCurrencyScanning(true)
     VoiceManager.unlockVoice()
     try {
-      const res = await recognizeBanknote(video, {
+      const res = await recognizeStableBanknote(video, {
         language: speechLanguage,
         forceAnnouncement: true,
         autoSpeak: true,
@@ -911,6 +978,7 @@ export default function Dashboard() {
       })
     } finally {
       isCurrencyScanningRef.current = false
+      lastCurrencyCheckTime.current = performance.now()
       setIsVisionCurrencyScanning(false)
     }
   }, [cameraActive, speechLanguage])
@@ -1376,7 +1444,8 @@ export default function Dashboard() {
                         cameraActive={cameraActive}
                         video={videoRef.current}
                         language={speechLanguage}
-                        canAnalyze={canRunKnownPersonAnalysis}
+                        beginAnalysis={beginKnownPersonAnalysis}
+                        endAnalysis={endKnownPersonAnalysis}
                         onStatus={reportKnownPersonStatus}
                       />
                     </Suspense>

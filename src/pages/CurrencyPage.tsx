@@ -6,7 +6,7 @@ import {
   Layers, Layers2, Sparkles, AlertTriangle, Cpu
 } from 'lucide-react'
 import {
-  loadCurrencyModel, recognizeBanknote, recognizeMultipleNotes, getCurrencyModelInfo, getCurrencyDiagnostics,
+  loadCurrencyModel, recognizeStableBanknote, recognizeMultipleNotes, getCurrencyModelInfo, getCurrencyDiagnostics,
   CLASS_METADATA, CURRENCY_CLASSES, CURRENCY_DISCLAIMER,
   type CurrencyRecognitionResult, type MultiNoteRecognitionResult, type CurrencyModelInfo, type CurrencyDiagnosticsData,
 } from '../services/currencyDetection'
@@ -131,7 +131,7 @@ export default function CurrencyPage() {
       VoiceManager.unlockVoice()
     }
 
-    const result = await recognizeBanknote(videoRef.current, {
+    const result = await recognizeStableBanknote(videoRef.current, {
       language: selectedLanguage,
       autoSpeak,
       speechVolume: speechVolumeLevel,

@@ -14,7 +14,7 @@ import { PeopleMemory } from '../remember/PeopleMemory'
 import { MemoryManager } from '../remember/MemoryManager'
 import { RoadIntelligence } from '../services/roadIntelligence'
 import { getLatestDetections } from '../services/naviEventBus'
-import { recognizeBanknote } from '../services/currencyDetection'
+import { recognizeStableBanknote } from '../services/currencyDetection'
 import { GPSService } from '../services/GPSService'
 
 export interface ToolExecutionResponse {
@@ -182,11 +182,11 @@ class NaviToolRouterClass {
               spokenResponse: "Camera is not currently active. Please open camera feed to scan currency.",
             }
           }
-          const result = await recognizeBanknote(video)
+          const result = await recognizeStableBanknote(video)
           if (!result.banknotePresence || !result.isConfident || result.denomination === 'NEGATIVE') {
             return {
               success: true,
-              spokenResponse: "No genuine Indian banknote detected. Please hold the banknote flat in front of the camera.",
+              spokenResponse: "No banknote could be confirmed across the camera frames. Please hold one note flat and steady, then scan again.",
               data: result
             }
           }
