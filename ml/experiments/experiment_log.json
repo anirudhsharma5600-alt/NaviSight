@@ -1,0 +1,23 @@
+[
+  {
+    "experiment_id": "EXP-CURR-001",
+    "date": "2026-10-31",
+    "description": "Baseline 7-class MobileNetV3 without negative class",
+    "result": "Critical failure: Classified laptops and receipts as ₹100 banknotes (57% confidence)",
+    "status": "SUPERSEDED"
+  },
+  {
+    "experiment_id": "EXP-CURR-002",
+    "date": "2026-11-01",
+    "description": "Two-Stage Verification + 8th NEGATIVE class with calibrated threshold (>=75%)",
+    "result": "Success: 100% rejection of laptop screens, keyboards, and plain paper; 96.4% banknote accuracy",
+    "status": "ACTIVE_PRODUCTION"
+  },
+  {
+    "experiment_id": "EXP-PROX-001",
+    "date": "2026-11-01",
+    "description": "Crowd spatial aggregation with temporal hysteresis debouncing",
+    "result": "Success: Suppressed repetitive announcements in crowds; emits single 'group of people' alert",
+    "status": "ACTIVE_PRODUCTION"
+  }
+]

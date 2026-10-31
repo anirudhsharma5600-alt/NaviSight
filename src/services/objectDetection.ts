@@ -24,23 +24,34 @@ export type ModelStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 export const CATEGORY_THRESHOLDS: Record<string, number> = {
   // Fast road vehicles (Safety critical: lower threshold to catch early)
-  car: 0.40,
-  motorcycle: 0.40,
-  bus: 0.40,
-  truck: 0.40,
-  bicycle: 0.42,
+  car: 0.38,
+  motorcycle: 0.38,
+  bus: 0.38,
+  truck: 0.38,
+  bicycle: 0.40,
   // Pedestrians (Debounce shadows / light poles)
-  person: 0.48,
+  person: 0.46,
   // Traffic controls
-  'traffic light': 0.45,
-  'stop sign': 0.45,
+  'traffic light': 0.40,
+  'stop sign': 0.40,
+  'fire hydrant': 0.42,
   // Walkway obstacles and furniture
-  bench: 0.45,
-  chair: 0.45,
-  'dining table': 0.48,
-  suitcase: 0.45,
-  backpack: 0.45,
-  'fire hydrant': 0.45,
+  bench: 0.42,
+  chair: 0.42,
+  couch: 0.45,
+  'dining table': 0.45,
+  bed: 0.48,
+  suitcase: 0.42,
+  backpack: 0.42,
+  handbag: 0.45,
+  umbrella: 0.42,
+  bottle: 0.48,
+  dog: 0.45,
+  cat: 0.45,
+  // Common items
+  tv: 0.48,
+  laptop: 0.48,
+  'cell phone': 0.48,
 }
 
 export function getCalibratedThreshold(className: string, defaultThreshold: number): number {
@@ -214,7 +225,27 @@ function assignIds(current: Detection[]): Detection[] {
     const id = bestId ?? nextId++
     if (bestId !== null) used.add(bestId)
     matched.add(id)
-    const trackedDetection = { ...detection, id }
+
+    // Temporal bounding box smoothing (EMA) to eliminate coordinate flicker and jitter
+    let smoothedBbox: [number, number, number, number] = detection.bbox
+    if (bestId !== null) {
+      const prevDet = activeTracks.get(bestId)?.detection
+      if (prevDet) {
+        const alpha = 0.65 // 65% new detection, 35% previous history
+        smoothedBbox = [
+          Math.round(prevDet.bbox[0] * (1 - alpha) + detection.bbox[0] * alpha),
+          Math.round(prevDet.bbox[1] * (1 - alpha) + detection.bbox[1] * alpha),
+          Math.round(prevDet.bbox[2] * (1 - alpha) + detection.bbox[2] * alpha),
+          Math.round(prevDet.bbox[3] * (1 - alpha) + detection.bbox[3] * alpha),
+        ]
+      }
+    }
+
+    const trackedDetection: Detection = {
+      ...detection,
+      id,
+      bbox: smoothedBbox,
+    }
     activeTracks.set(id, { detection: trackedDetection, missedFrames: 0 })
     result.push(trackedDetection)
   }
@@ -256,6 +287,7 @@ let _resizeCanvas: OffscreenCanvas | HTMLCanvasElement | null = null
 function getResizedFrame(video: HTMLVideoElement, maxDim: number): HTMLCanvasElement | OffscreenCanvas | HTMLVideoElement {
   const vw = video.videoWidth
   const vh = video.videoHeight
+  if (!vw || !vh || vw <= 0 || vh <= 0) return video
   // Skip resize if already small enough
   if (vw <= maxDim && vh <= maxDim) return video
 

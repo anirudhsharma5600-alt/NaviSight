@@ -75,6 +75,10 @@ const lastSeenAt: Map<string, number> = new Map()
 // One short urgent sound at a state change, with a global safety cooldown.
 let lastBeepTime = 0
 let lastVoiceAlertTime = 0
+let lastCrowdAnnouncementTime = 0
+const CROWD_COOLDOWN_MS = 18000
+const lastAnnouncedTrackTime: Map<string, number> = new Map()
+const OBJECT_ALERT_COOLDOWN_MS = 8000
 let currentState: ProximityState = 'CLEAR'
 
 // BLE hardware integration
@@ -271,6 +275,22 @@ export function processDetectionsForProximity(
   const activeKeys = new Set<string>()
   const alerts: ProximityAlert[] = []
 
+  // Crowd Intelligence: Check if frame contains a group of people (>= 4)
+  const persons = detections.filter(d => d.class.toLowerCase() === 'person' && d.score >= 0.46)
+  const isCrowdPresent = persons.length >= 4
+
+  if (isCrowdPresent && config.voiceEnabled && now - lastCrowdAnnouncementTime >= CROWD_COOLDOWN_MS) {
+    lastCrowdAnnouncementTime = now
+    const crowdMessage = config.language === 'hi'
+      ? 'आसपास लोगों का एक समूह है।'
+      : 'A group of people is nearby.'
+    SmartAnnouncementManager.announce(crowdMessage, 'NORMAL', {
+      domain: 'crowd',
+      lang: config.language === 'hi' ? 'hi' : 'en',
+      cooldownMs: CROWD_COOLDOWN_MS,
+    })
+  }
+
   let highestPersonAlert: ProximityAlert | null = null
   const newlyActionableAlerts: Array<{ alert: ProximityAlert; trackState: string }> = []
 
@@ -373,6 +393,9 @@ export function processDetectionsForProximity(
       persistenceCount.delete(key)
       lastTrackState.delete(key)
       lastSeenAt.delete(key)
+      if (now - (lastSeenAt.get(key) || 0) > 5000) {
+        lastAnnouncedTrackTime.delete(key)
+      }
     }
   }
 
@@ -389,6 +412,19 @@ export function processDetectionsForProximity(
   const alertIsReadyToSpeak = selected && config.voiceEnabled && now - lastVoiceAlertTime >= 2500
   if (selected && alertIsReadyToSpeak) {
     const strongestNewlyUrgentAlert = selected.alert
+
+    // In a crowded setting, suppress individual person spam unless someone is in the NEAR critical zone
+    if (isCrowdPresent && strongestNewlyUrgentAlert.isPerson && strongestNewlyUrgentAlert.zone !== 'NEAR') {
+      return alerts.sort((a, b) => b.closenessScore - a.closenessScore)
+    }
+
+    // Suppress repeated stationary announcements for the exact same tracked target (8-second debounce)
+    const targetKey = `${strongestNewlyUrgentAlert.objectId}`
+    const lastAnnounceForTarget = lastAnnouncedTrackTime.get(targetKey) || 0
+    if (now - lastAnnounceForTarget < OBJECT_ALERT_COOLDOWN_MS && strongestNewlyUrgentAlert.zone !== 'NEAR') {
+      return alerts.sort((a, b) => b.closenessScore - a.closenessScore)
+    }
+
     const position = config.language === 'hi'
       ? strongestNewlyUrgentAlert.position === 'LEFT' ? 'आपके बाईं ओर' : strongestNewlyUrgentAlert.position === 'RIGHT' ? 'आपके दाईं ओर' : 'सामने'
       : strongestNewlyUrgentAlert.position === 'LEFT' ? 'on your left' : strongestNewlyUrgentAlert.position === 'RIGHT' ? 'on your right' : 'ahead'
@@ -407,8 +443,20 @@ export function processDetectionsForProximity(
         : `${objectName} ${position} ${strongestNewlyUrgentAlert.direction === 'APPROACHING' ? 'appears to be getting closer' : 'is very close'}.`
 
     lastVoiceAlertTime = now
-    lastTrackState.set(`${strongestNewlyUrgentAlert.objectId}`, selected.trackState)
-    speak(message, config.language === 'hi' ? 'hi-IN' : 'en-US')
+    lastAnnouncedTrackTime.set(targetKey, now)
+    lastTrackState.set(targetKey, selected.trackState)
+
+    // Route through single authoritative SmartAnnouncementManager (anti-echo & priority)
+    SmartAnnouncementManager.announce(
+      message,
+      strongestNewlyUrgentAlert.zone === 'NEAR' ? 'HIGH' : 'NORMAL',
+      {
+        domain: 'proximity',
+        lang: config.language === 'hi' ? 'hi' : 'en',
+        force: strongestNewlyUrgentAlert.zone === 'NEAR',
+        cooldownMs: 3000,
+      }
+    )
 
     if (
       strongestNewlyUrgentAlert.zone === 'NEAR' &&
