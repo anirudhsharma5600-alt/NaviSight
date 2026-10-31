@@ -16,6 +16,7 @@ const StatusPage = lazy(() => import('./pages/StatusPage'))
 const ProximityPage = lazy(() => import('./pages/ProximityPage'))
 const CurrencyPage = lazy(() => import('./pages/CurrencyPage'))
 const PotholePage = lazy(() => import('./pages/PotholePage'))
+const RememberPage = lazy(() => import('./pages/RememberPage'))
 
 function App() {
   return (
@@ -33,6 +34,7 @@ function App() {
           <Route path="/proximity" element={<ProximityPage />} />
           <Route path="/currency" element={<CurrencyPage />} />
           <Route path="/pothole" element={<PotholePage />} />
+          <Route path="/remember" element={<RememberPage />} />
         </Routes>
       </Suspense>
       <Footer />

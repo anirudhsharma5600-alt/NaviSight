@@ -19,6 +19,7 @@ import { analyzeRoadSurfaceHeuristic } from '../services/potholeDetection'
 import { AssistantState, type AssistantLanguage } from './AssistantState'
 import { VoiceResponse } from './VoiceResponse'
 import type { ParsedIntent } from './IntentClassifier'
+import { NaviToolRouter } from './NaviToolRouter'
 
 export interface CommandExecutionResult {
   spokenText: string
@@ -422,6 +423,93 @@ class VoiceCommandRouterEngine {
             : 'Opening text reader. Hold text in front of camera.',
         success: true,
         actionTaken: 'NAVIGATED_OCR',
+      }
+    })
+
+    // ─── 7. Remember & Personal Memory Commands ───
+    this.register('REMEMBER_OPEN', async (_, lang, navigate) => {
+      if (navigate) navigate('/remember')
+      return {
+        spokenText: lang === 'hi' ? 'रिमेंबर डैशबोर्ड खोला जा रहा है।' : 'Opening Remember dashboard.',
+        success: true,
+        actionTaken: 'NAVIGATED_REMEMBER',
+      }
+    })
+
+    this.register('REMEMBER_ROUTE_START', async (intent) => {
+      const query = intent.rawQuery.replace(/(remember|record|track|start)\s*(this\s*)?(walking\s*)?route/i, '').trim()
+      const routeName = query || 'Walk Route'
+      const res = await NaviToolRouter.executeTool('startRouteRecording', { routeName })
+      return {
+        spokenText: res.spokenResponse,
+        success: res.success,
+        actionTaken: 'ROUTE_RECORDING_STARTED',
+        payload: res.data,
+      }
+    })
+
+    this.register('REMEMBER_ROUTE_STOP', async (intent) => {
+      const query = intent.rawQuery.replace(/(save|finish|stop)\s*(this\s*)?route/i, '').replace(/as\s*/i, '').trim()
+      const res = await NaviToolRouter.executeTool('stopAndSaveRoute', { routeName: query || undefined })
+      return {
+        spokenText: res.spokenResponse,
+        success: res.success,
+        actionTaken: 'ROUTE_SAVED',
+      }
+    })
+
+    this.register('REMEMBER_ROUTE_RECALL', async (intent) => {
+      const query = intent.rawQuery.replace(/(tell\s*me\s*about\s*route|how\s*do\s*i\s*get\s*to|recall\s*route|describe\s*route)/i, '').trim()
+      const res = await NaviToolRouter.executeTool('recallRoute', { routeName: query })
+      return {
+        spokenText: res.spokenResponse,
+        success: res.success,
+        actionTaken: 'ROUTE_RECALLED',
+        payload: res.data,
+      }
+    })
+
+    this.register('REMEMBER_PLACE_SAVE', async (intent) => {
+      const query = intent.rawQuery.replace(/(remember|save)\s*(this\s*)?(place|location|spot)/i, '').replace(/as\s*/i, '').trim()
+      const placeName = query || 'Marked Place'
+      const res = await NaviToolRouter.executeTool('savePlace', { placeName })
+      return {
+        spokenText: res.spokenResponse,
+        success: res.success,
+        actionTaken: 'PLACE_SAVED',
+        payload: res.data,
+      }
+    })
+
+    this.register('REMEMBER_VISUAL_SAVE', async (intent) => {
+      const query = intent.rawQuery.replace(/(remember\s*what\s*this\s*looks\s*like|save\s*visual\s*memory|remember\s*this\s*view)/i, '').trim()
+      const memName = query || 'Scene Memory'
+      const res = await NaviToolRouter.executeTool('saveVisualMemory', { memoryName: memName })
+      return {
+        spokenText: res.spokenResponse,
+        success: res.success,
+        actionTaken: 'VISUAL_MEMORY_SAVED',
+        payload: res.data,
+      }
+    })
+
+    this.register('REMEMBER_VISUAL_RECALL', async () => {
+      const res = await NaviToolRouter.executeTool('checkSceneResemblance', {})
+      return {
+        spokenText: res.spokenResponse,
+        success: res.success,
+        actionTaken: 'VISUAL_SCENE_CHECKED',
+        payload: res.data,
+      }
+    })
+
+    this.register('REMEMBER_SEARCH', async (intent) => {
+      const query = intent.rawQuery.replace(/(what\s*did\s*i\s*save\s*about|search\s*memories\s*for|do\s*you\s*remember|find\s*in\s*memory)/i, '').trim()
+      const res = await NaviToolRouter.executeTool('searchMemories', { query })
+      return {
+        spokenText: res.spokenResponse,
+        success: res.success,
+        actionTaken: 'MEMORY_SEARCHED',
       }
     })
   }

@@ -27,6 +27,8 @@ import { RoadIntelligence } from '../services/roadIntelligence'
 import {
   recognizeBanknote, loadCurrencyModel, type CurrencyRecognitionResult,
 } from '../services/currencyDetection'
+import { NaviToolRouter } from '../assistant/NaviToolRouter'
+import { NaviLiveSession } from '../assistant/NaviLiveSession'
 
 // ─── Helper for readyState text ───
 function getReadyStateDescription(state: number): string {
@@ -500,6 +502,10 @@ export default function Dashboard() {
     setIsStartingCamera(false)
     isStartingRef.current = false
 
+    // Connect active video feed to tool router & live multimodal session
+    NaviToolRouter.setActiveVideoElement(video)
+    NaviLiveSession.setVideoSource(video)
+
     // Update Debugging Panel state (Requirement D)
     setDebugInfo(prev => ({
       ...prev,
@@ -530,6 +536,8 @@ export default function Dashboard() {
     if (videoRef.current) {
       videoRef.current.srcObject = null
     }
+    NaviToolRouter.setActiveVideoElement(null)
+    NaviLiveSession.setVideoSource(null)
     setCameraActive(false)
     setCameraStatus('inactive')
     setDetections([])

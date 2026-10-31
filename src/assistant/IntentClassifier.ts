@@ -15,6 +15,7 @@ export type IntentCategory =
   | 'ROAD_HAZARD'
   | 'OCR'
   | 'ASSISTANT_CONTROL'
+  | 'REMEMBER'
   | 'UNKNOWN'
 
 export interface ParsedIntent {
@@ -315,6 +316,74 @@ const INTENT_CATALOG: IntentPattern[] = [
     category: 'ASSISTANT_CONTROL',
     patterns: [
       /\b(enable\s*voice\s*assistant|start\s*navi|listen\s*to\s*me)\b/i,
+    ],
+  },
+
+  // ─── 8. Remember & Personal Memory Commands ───
+  {
+    intent: 'REMEMBER_OPEN',
+    category: 'REMEMBER',
+    patterns: [
+      /\b(open|go to|show|view)\s*(the\s*)?(remember|memories|memory)\b/i,
+      /\b(यादें\s*खोलो|ਰਿਮੈਂਬਰ\s*ਖੋਲ੍ਹੋ)\b/i,
+    ],
+  },
+  {
+    intent: 'REMEMBER_ROUTE_START',
+    category: 'REMEMBER',
+    patterns: [
+      /\b(remember|record|track|start)\s*(this\s*)?(walking\s*)?route\b/i,
+      /\b(start\s*route\s*recording)\b/i,
+      /\b(रास्ता\s*याद\s*रखो|रास्ता\s*रिकॉर्ड\s*करो)\b/i,
+    ],
+  },
+  {
+    intent: 'REMEMBER_ROUTE_STOP',
+    category: 'REMEMBER',
+    patterns: [
+      /\b(save|finish|stop)\s*(this\s*)?route\b/i,
+      /\b(reached\s*(the\s*)?destination)\b/i,
+      /\b(रास्ता\s*सेव\s*करो|मंजिल\s*पर\s*पहुंच\s*गए)\b/i,
+    ],
+  },
+  {
+    intent: 'REMEMBER_ROUTE_RECALL',
+    category: 'REMEMBER',
+    patterns: [
+      /\b(tell\s*me\s*about\s*route|how\s*do\s*i\s*get\s*to|recall\s*route|describe\s*route)\b/i,
+      /\b(रास्ता\s*बताओ)\b/i,
+    ],
+  },
+  {
+    intent: 'REMEMBER_PLACE_SAVE',
+    category: 'REMEMBER',
+    patterns: [
+      /\b(remember|save)\s*(this\s*)?(place|location|spot)\b/i,
+      /\b(save\s*place\s*as)\b/i,
+      /\b(यह\s*जगह\s*याद\s*रखो|जगह\s*सेव\s*करो)\b/i,
+    ],
+  },
+  {
+    intent: 'REMEMBER_VISUAL_SAVE',
+    category: 'REMEMBER',
+    patterns: [
+      /\b(remember\s*what\s*this\s*looks\s*like|save\s*visual\s*memory|remember\s*this\s*view|remember\s*this\s*room)\b/i,
+    ],
+  },
+  {
+    intent: 'REMEMBER_VISUAL_RECALL',
+    category: 'REMEMBER',
+    patterns: [
+      /\b(do\s*you\s*remember\s*this\s*(place|room|view)?|where\s*am\s*i|recognize\s*this\s*(scene|place))\b/i,
+      /\b(क्या\s*तुम्हें\s*यह\s*जगह\s*याद\s*है|मैं\s*कहाँ\s*हूँ)\b/i,
+    ],
+  },
+  {
+    intent: 'REMEMBER_SEARCH',
+    category: 'REMEMBER',
+    patterns: [
+      /\b(what\s*did\s*i\s*save\s*about|search\s*memories\s*for|do\s*you\s*remember|find\s*in\s*memory)\b/i,
+      /\b(यादों\s*में\s*ढूंढो)\b/i,
     ],
   },
 ]

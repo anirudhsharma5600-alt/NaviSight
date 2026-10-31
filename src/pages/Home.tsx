@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { Eye, Mic, ScanText, MapPin, AlertTriangle, Volume2, ArrowRight, Zap, Shield, Cpu } from 'lucide-react'
+import { Eye, Mic, ScanText, MapPin, AlertTriangle, Volume2, ArrowRight, Zap, Shield, Cpu, Compass } from 'lucide-react'
 import Hero from '../components/Hero'
 import FeatureCard from '../components/FeatureCard'
 import { Link } from 'react-router-dom'
@@ -14,6 +14,7 @@ const fadeUp = {
 }
 
 const features = [
+  { icon: <Compass className="w-8 h-8 text-cyan-400" />, title: 'Remember', description: '"Navi remembers what matters." Save routes, important places, trusted contacts, and familiar surroundings.', tag: 'Live' as const, link: '/remember' },
   { icon: <Eye className="w-8 h-8" />, title: 'AI Vision', description: 'Real-time object detection powered by COCO-SSD. Identifies objects and their positions in your surroundings.', tag: 'Live' as const, link: '/dashboard' },
   { icon: <Mic className="w-8 h-8" />, title: 'Voice Assistant', description: 'Talk to Navi, your intelligent AI companion. Use voice commands to interact hands-free.', tag: 'Live' as const, link: '/voice' },
   { icon: <ScanText className="w-8 h-8" />, title: 'Smart OCR', description: 'Read signs, labels, and documents instantly using your camera. Text is read aloud for you.', tag: 'Live' as const, link: '/ocr' },

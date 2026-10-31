@@ -386,6 +386,43 @@ export default function VoiceAssistant() {
                 </button>
               </div>
             </div>
+
+            {/* Category 5: Remember & Personal Memory */}
+            <div className="glass-card p-4 border border-emerald-500/20 bg-emerald-950/10 md:col-span-2">
+              <h4 className="text-xs font-bold text-emerald-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                🧠 Remember: Routes, Places & Personal Memory
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                <button
+                  onClick={() => handleQuickCommand('remember this route')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-emerald-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-emerald-400 font-mono">"Hey Navi, remember this route"</span>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Starts GPS breadcrumb recording with landmark voice notes</p>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('save this route')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-emerald-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-emerald-400 font-mono">"Hey Navi, save this route"</span>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Computes distance, duration, and saves to IndexedDB</p>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('remember this place')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-emerald-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-emerald-400 font-mono">"Hey Navi, remember this place"</span>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Pins current GPS coordinates with custom name</p>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('remember what this looks like')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-emerald-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-emerald-400 font-mono">"Hey Navi, remember what this looks like"</span>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Stores visual scene signature and detected object tags</p>
+                </button>
+              </div>
+            </div>
           </div>
         </motion.div>
       </div>

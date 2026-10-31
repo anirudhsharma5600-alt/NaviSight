@@ -194,3 +194,4 @@ In `src/pages/CurrencyPage.tsx`, the Diagnostics Panel now exposes live telemetr
   *Verified*: Actual ₹100 banknotes achieve 99.8% confidence and announce *"This appears to be a 100-rupee note."*
 - [x] **Criterion 3: Fix the underlying model and inference pipeline, not just the interface.**  
   *Verified*: Retrained MobileNetV3 with 8 classes (including hard negatives), exported new 5.83 MB ONNX model, and deployed two-stage verification pipeline with open-set rejection.
+
