@@ -1,422 +1,596 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from 'react-leaflet'
-import L from 'leaflet'
+/**
+ * NaviAble AI — Pedestrian Voice Navigation Dashboard
+ * 
+ * Accessible, WCAG-compliant interface designed for visually impaired and sighted users:
+ * - Real GPS walking navigation with MapLibre GL JS & OpenStreetMap.
+ * - Spoken turn-by-turn directions via central SmartAnnouncementManager.
+ * - Dynamic route matching, progress tracking, and off-route detection.
+ * - Real-time obstacle awareness from camera object detection.
+ * - Laptop route simulator for indoor verification.
+ */
+
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
-  MapPin, Locate, Loader2, Navigation2, Search, AlertCircle,
-  Route, Clock, Ruler, X, Volume2, ChevronDown,
+  Navigation2, Search, MapPin, Locate, Play, Pause, Square, RotateCcw,
+  Volume2, VolumeX, ShieldAlert, AlertTriangle, Eye, Compass,
+  ArrowUp, CornerUpLeft, CornerUpRight, ArrowUpLeft, ArrowUpRight,
+  Clock, Footprints, Info, Sparkles, CheckCircle2
 } from 'lucide-react'
-import { speak } from '../../services/speechService'
-import 'leaflet/dist/leaflet.css'
-
-// Fix leaflet default marker icons
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-})
-
-// Destination marker (purple)
-const destIcon = new L.Icon({
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-  shadowSize: [41, 41],
-  className: 'hue-rotate-[270deg]',
-})
-
-interface GeoResult {
-  lat: number
-  lng: number
-  display_name: string
-}
-
-interface RouteData {
-  distanceKm: number
-  durationMin: number
-  geometry: [number, number][]
-  steps: { instruction: string; distanceM: number }[]
-}
-
-function FitBounds({ bounds }: { bounds: L.LatLngBoundsExpression }) {
-  const map = useMap()
-  useEffect(() => {
-    map.fitBounds(bounds, { padding: [50, 50], maxZoom: 16 })
-  }, [bounds, map])
-  return null
-}
-
-function FlyToLocation({ lat, lng }: { lat: number; lng: number }) {
-  const map = useMap()
-  useEffect(() => {
-    map.flyTo([lat, lng], 16, { duration: 1.5 })
-  }, [lat, lng, map])
-  return null
-}
+import MapLibreView from '../../components/navigation/MapLibreView'
+import { navigationEngine } from '../../services/navigation/navigationEngine'
+import { geocodingService } from '../../services/navigation/geocodingService'
+import { GPSService } from '../../services/GPSService'
+import { SmartAnnouncementManager } from '../../services/SmartAnnouncementManager'
+import type {
+  PedestrianRoute,
+  NavigationMode,
+  NavigationProgress,
+  GPSAccuracyQuality,
+  ObstacleDetectionWarning,
+  GeocodingResult,
+  GeoCoordinate,
+  ManeuverType,
+} from '../../services/navigation/types'
+import type { GPSPosition } from '../../services/GPSService'
 
 export default function Navigation() {
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+  const [mode, setMode] = useState<NavigationMode>('IDLE')
+  const [route, setRoute] = useState<PedestrianRoute | null>(null)
+  const [currentPosition, setCurrentPosition] = useState<GPSPosition | null>(null)
+  const [progress, setProgress] = useState<NavigationProgress | null>(null)
+  const [gpsQuality, setGpsQuality] = useState<GPSAccuracyQuality>({ accuracyMeters: 999, quality: 'UNUSABLE', isReliableForTurns: false })
+  const [activeObstacle, setActiveObstacle] = useState<ObstacleDetectionWarning | null>(null)
+  const [isSimulating, setIsSimulating] = useState(false)
+
+  // Search input state
   const [searchQuery, setSearchQuery] = useState('')
-  const [searching, setSearching] = useState(false)
-  const [flyTo, setFlyTo] = useState<{ lat: number; lng: number } | null>(null)
-  const [searchResults, setSearchResults] = useState<GeoResult[]>([])
-  const [destination, setDestination] = useState<GeoResult | null>(null)
-  const [routeData, setRouteData] = useState<RouteData | null>(null)
-  const [routeLoading, setRouteLoading] = useState(false)
-  const [showSteps, setShowSteps] = useState(false)
-  const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchResults, setSearchResults] = useState<GeocodingResult[]>([])
+  const [destinationCoord, setDestinationCoord] = useState<GeoCoordinate | null>(null)
+  const [destinationName, setDestinationName] = useState('')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [speechMuted, setSpeechMuted] = useState(false)
+  const [showSimControls, setShowSimControls] = useState(false)
+  const [simSpeed, setSimSpeed] = useState(1.0)
 
-  const getLocation = useCallback(() => {
-    if (!navigator.geolocation) {
-      setError('Geolocation is not supported by your browser.')
-      return
-    }
-    setLoading(true)
-    setError('')
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const loc = { lat: pos.coords.latitude, lng: pos.coords.longitude }
-        setLocation(loc)
-        setFlyTo(loc)
-        setLoading(false)
-      },
-      (err) => {
-        setError(
-          err.code === 1 ? 'Location permission denied.' :
-          err.code === 2 ? 'Location unavailable.' :
-          'Location request timed out.'
-        )
-        setLoading(false)
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    )
-  }, [])
+  const searchTimeoutRef = useRef<any>(null)
 
-  useEffect(() => { getLocation() }, [getLocation])
-
-  // Geocode search using Nominatim (free, no API key)
-  const searchPlace = useCallback(async (query: string) => {
-    if (!query.trim()) {
-      setSearchResults([])
-      return
-    }
-    setSearching(true)
-    try {
-      const resp = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=0`,
-        { headers: { 'Accept-Language': 'en' } }
-      )
-      const data = await resp.json()
-      setSearchResults(
-        data.map((r: any) => ({
-          lat: parseFloat(r.lat),
-          lng: parseFloat(r.lon),
-          display_name: r.display_name as string,
-        }))
-      )
-    } catch {
-      setSearchResults([])
-    }
-    setSearching(false)
-  }, [])
-
-  // Debounced search
-  const onSearchInput = (val: string) => {
-    setSearchQuery(val)
-    if (searchTimeout.current) clearTimeout(searchTimeout.current)
-    searchTimeout.current = setTimeout(() => searchPlace(val), 400)
-  }
-
-  // Select destination and compute route via OSRM
-  const selectDestination = useCallback(async (result: GeoResult) => {
-    setDestination(result)
-    setSearchResults([])
-    setSearchQuery(result.display_name.split(',')[0])
-
-    if (!location) {
-      setError('Your location is needed to compute a route.')
-      return
-    }
-
-    setRouteLoading(true)
-    setRouteData(null)
-    try {
-      // OSRM free routing API (walking profile)
-      const resp = await fetch(
-        `https://router.project-osrm.org/route/v1/foot/${location.lng},${location.lat};${result.lng},${result.lat}?overview=full&geometries=geojson&steps=true`
-      )
-      const data = await resp.json()
-      if (data.code !== 'Ok' || !data.routes?.length) {
-        setError('Could not compute a walking route. The destination might be unreachable on foot.')
-        setRouteLoading(false)
-        return
+  // Subscribe to NavigationEngine updates
+  useEffect(() => {
+    const unsubscribe = navigationEngine.subscribe((state) => {
+      setMode(state.mode)
+      setRoute(state.route)
+      setCurrentPosition(state.currentPosition)
+      setProgress(state.progress)
+      setGpsQuality(state.gpsQuality)
+      setActiveObstacle(state.activeObstacle)
+      setIsSimulating(state.isSimulating)
+      if (state.route) {
+        setDestinationCoord(state.route.destination)
+        setDestinationName(state.route.destinationName)
       }
-      const route = data.routes[0]
-      const geometry: [number, number][] = route.geometry.coordinates.map(
-        (c: [number, number]) => [c[1], c[0]] as [number, number]
-      )
-      const steps = route.legs[0].steps.map((s: any) => ({
-        instruction: s.maneuver?.type
-          ? `${s.maneuver.modifier ? s.maneuver.modifier + ' ' : ''}${s.maneuver.type}${s.name ? ' onto ' + s.name : ''}`
-          : s.name || 'Continue',
-        distanceM: Math.round(s.distance),
-      })).filter((s: any) => s.distanceM > 0)
+    })
 
-      setRouteData({
-        distanceKm: Math.round(route.distance / 10) / 100,
-        durationMin: Math.round(route.duration / 60),
-        geometry,
-        steps,
-      })
+    // Request initial position
+    GPSService.getCurrentPosition().catch((err) => {
+      console.warn('[NavigationUI] Initial GPS request:', err.message)
+    })
 
-      // Announce route
-      const summary = `Route found. ${Math.round(route.distance / 10) / 100} kilometers, approximately ${Math.round(route.duration / 60)} minutes walking.`
-      speak(summary)
-    } catch {
-      setError('Failed to fetch route. Check your internet connection.')
+    return () => {
+      unsubscribe()
     }
-    setRouteLoading(false)
-  }, [location])
+  }, [])
 
-  const clearRoute = () => {
-    setDestination(null)
-    setRouteData(null)
-    setSearchQuery('')
-    setShowSteps(false)
+  // Debounced Place Search
+  const handleSearchChange = (val: string) => {
+    setSearchQuery(val)
+    setErrorMessage(null)
+
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
+
+    if (!val.trim() || val.length < 2) {
+      setSearchResults([])
+      setIsSearching(false)
+      return
+    }
+
+    setIsSearching(true)
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const results = await geocodingService.searchPlaces(val)
+        setSearchResults(results)
+      } catch {
+        setSearchResults([])
+      } finally {
+        setIsSearching(false)
+      }
+    }, 450)
   }
 
-  const defaultCenter: [number, number] = location ? [location.lat, location.lng] : [20.5937, 78.9629]
-  const defaultZoom = location ? 16 : 5
+  // Handle Destination Selection from Search
+  const handleSelectDestination = async (item: GeocodingResult) => {
+    setSearchQuery(item.name)
+    setDestinationName(item.name)
+    setSearchResults([])
+    setErrorMessage(null)
 
-  // Bounds for auto-fit when route exists
-  const routeBounds = routeData && location && destination
-    ? L.latLngBounds(
-        [location.lat, location.lng],
-        [destination.lat, destination.lng]
-      )
-    : null
+    const targetCoord: GeoCoordinate = { lat: item.lat, lng: item.lng }
+    setDestinationCoord(targetCoord)
+
+    try {
+      await navigationEngine.setDestination(targetCoord, item.name)
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Could not find a walking route to this location.')
+    }
+  }
+
+  // Handle Map Click Destination Selection
+  const handleSelectMapCoordinate = async (coord: GeoCoordinate) => {
+    setSearchResults([])
+    setErrorMessage(null)
+    setDestinationCoord(coord)
+
+    const resolvedName = await geocodingService.reverseGeocode(coord)
+    setSearchQuery(resolvedName)
+    setDestinationName(resolvedName)
+
+    try {
+      await navigationEngine.setDestination(coord, resolvedName)
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Could not calculate a pedestrian route to this pin.')
+    }
+  }
+
+  // Navigation Control Actions
+  const handleStart = () => {
+    setErrorMessage(null)
+    navigationEngine.startNavigation()
+  }
+
+  const handlePause = () => {
+    navigationEngine.pauseNavigation()
+  }
+
+  const handleResume = () => {
+    navigationEngine.resumeNavigation()
+  }
+
+  const handleStop = () => {
+    navigationEngine.stopNavigation()
+    setRoute(null)
+    setDestinationCoord(null)
+    setDestinationName('')
+    setSearchQuery('')
+    setProgress(null)
+  }
+
+  const handleRecalculate = () => {
+    navigationEngine.recalculateRoute()
+  }
+
+  const handleRepeatDirection = () => {
+    navigationEngine.repeatInstruction()
+  }
+
+  const toggleMute = () => {
+    const newMuted = !speechMuted
+    setSpeechMuted(newMuted)
+    navigationEngine.setConfig({ voiceGuidanceEnabled: !newMuted })
+    if (newMuted) {
+      SmartAnnouncementManager.silence()
+    } else {
+      SmartAnnouncementManager.announce('Voice directions enabled.', 'NORMAL')
+    }
+  }
+
+  // Simulation handlers
+  const handleToggleSimulation = () => {
+    if (isSimulating) {
+      navigationEngine.stopSimulation()
+    } else {
+      navigationEngine.startSimulation(simSpeed)
+    }
+  }
+
+  const handleSimSpeedChange = (speed: number) => {
+    setSimSpeed(speed)
+    if (isSimulating) {
+      navigationEngine.startSimulation(speed)
+    }
+  }
+
+  // Format Helper: Meters & Kilometers
+  const formatDistance = (meters: number) => {
+    if (meters >= 1000) {
+      return `${(meters / 1000).toFixed(1)} km`
+    }
+    return `${Math.round(meters)} m`
+  }
+
+  // Format Helper: Minutes & Hours
+  const formatDuration = (seconds: number) => {
+    const min = Math.round(seconds / 60)
+    if (min >= 60) {
+      const h = Math.floor(min / 60)
+      const m = min % 60
+      return `${h}h ${m}m`
+    }
+    return `${min} min`
+  }
+
+  // Maneuver Icon Renderer
+  const renderManeuverIcon = (maneuver?: ManeuverType) => {
+    switch (maneuver) {
+      case 'turn_left':
+      case 'turn_sharp_left':
+        return <CornerUpLeft className="w-8 h-8 text-primary-400" />
+      case 'turn_slight_left':
+        return <ArrowUpLeft className="w-8 h-8 text-primary-400" />
+      case 'turn_right':
+      case 'turn_sharp_right':
+        return <CornerUpRight className="w-8 h-8 text-primary-400" />
+      case 'turn_slight_right':
+        return <ArrowUpRight className="w-8 h-8 text-primary-400" />
+      case 'arrive':
+        return <CheckCircle2 className="w-8 h-8 text-emerald-400" />
+      case 'depart':
+      case 'continue':
+      default:
+        return <ArrowUp className="w-8 h-8 text-primary-400" />
+    }
+  }
 
   return (
-    <div className="min-h-screen pt-20 pb-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-6xl mx-auto">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-8">
-          <h1 className="font-display text-3xl md:text-4xl font-bold mb-2">
-            Smart <span className="gradient-text">Navigation</span>
-          </h1>
-          <p className="text-gray-400">GPS-powered walking directions with voice guidance</p>
-        </motion.div>
+    <div className="min-h-screen pt-20 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="text-center mb-6">
+        <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight font-display mb-2">
+          NAVI <span className="gradient-text">Voice Navigation</span>
+        </h1>
+        <p className="text-gray-400 text-sm md:text-base max-w-2xl mx-auto">
+          Accessible, pedestrian-first walking guidance with live GPS tracking, turn announcements, and obstacle awareness.
+        </p>
+      </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Map */}
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="lg:col-span-2 glass-card overflow-hidden" style={{ minHeight: 500 }}>
-            <MapContainer
-              center={defaultCenter}
-              zoom={defaultZoom}
-              className="w-full"
-              style={{ height: 500, borderRadius: 16 }}
-              zoomControl={false}
-            >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'
-              />
-              {location && (
-                <>
-                  <Marker position={[location.lat, location.lng]}>
-                    <Popup>
-                      <strong>Your Location</strong><br />
-                      {location.lat.toFixed(5)}, {location.lng.toFixed(5)}
-                    </Popup>
-                  </Marker>
-                  {!routeBounds && flyTo && <FlyToLocation lat={flyTo.lat} lng={flyTo.lng} />}
-                </>
-              )}
-              {destination && (
-                <Marker position={[destination.lat, destination.lng]} icon={destIcon}>
-                  <Popup>
-                    <strong>Destination</strong><br />
-                    {destination.display_name.split(',').slice(0, 2).join(', ')}
-                  </Popup>
-                </Marker>
-              )}
-              {routeData && (
-                <Polyline
-                  positions={routeData.geometry}
-                  pathOptions={{ color: '#00e5ff', weight: 5, opacity: 0.85, dashArray: '10 6' }}
-                />
-              )}
-              {routeBounds && <FitBounds bounds={routeBounds} />}
-            </MapContainer>
+      {/* Critical Safety Notice (Section 10) */}
+      <div className="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-start gap-3">
+        <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="text-xs md:text-sm text-amber-200/90 leading-relaxed">
+          <strong className="text-amber-300">Important Mobility Safety Notice:</strong> NaviAble provides walking route directions only. It cannot guarantee that pathways or pedestrian crossings are free of obstacles, surface hazards, or oncoming traffic. Always rely on your primary mobility aid (white cane or guide dog) and your senses.
+        </div>
+      </div>
+
+      {/* Obstacle Awareness Warning Banner (Section 9 & 12) */}
+      <AnimatePresence>
+        {activeObstacle && mode === 'NAVIGATING' && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="mb-6 p-4 rounded-xl bg-rose-500/20 border-2 border-rose-500/60 shadow-lg shadow-rose-950/40 flex items-center justify-between gap-4"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-lg bg-rose-500/30 text-rose-300 animate-pulse">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="font-semibold text-rose-200 text-sm md:text-base">
+                  Possible Obstacle Ahead: <span className="capitalize">{activeObstacle.objectClass}</span>
+                </div>
+                <div className="text-xs text-rose-300/80">
+                  Detected in camera view ({activeObstacle.position} zone). Pause and check with your cane.
+                </div>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 text-xs font-bold rounded-full bg-rose-600 text-white uppercase tracking-wider">
+              Caution
+            </span>
           </motion.div>
+        )}
+      </AnimatePresence>
 
-          {/* Sidebar */}
-          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.15 }} className="space-y-4">
-            {/* Location Info */}
-            <div className="glass-card p-5">
-              <h3 className="font-display text-lg font-semibold mb-3 flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-cyan-400" /> Your Location
-              </h3>
-              {loading ? (
-                <div className="flex items-center gap-2 text-cyan-400 text-sm">
-                  <Loader2 className="w-4 h-4 animate-spin" /> Getting location...
-                </div>
-              ) : location ? (
-                <div className="space-y-2 text-sm">
-                  <div className="bg-white/[0.03] rounded-lg p-3">
-                    <span className="text-gray-500">Latitude:</span>{' '}
-                    <span className="text-cyan-400 font-mono">{location.lat.toFixed(6)}</span>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column: Map & Simulation Controls */}
+        <div className="lg:col-span-2 space-y-4">
+          <MapLibreView
+            currentPosition={currentPosition}
+            route={route}
+            destination={destinationCoord}
+            isNavigating={mode === 'NAVIGATING'}
+            onSelectMapDestination={handleSelectMapCoordinate}
+          />
+
+          {/* GPS Quality Bar & Lat/Lng details */}
+          <div className="glass-card p-3 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs md:text-sm">
+            <div className="flex items-center gap-2">
+              <div className={`w-2.5 h-2.5 rounded-full ${
+                gpsQuality.quality === 'EXCELLENT' || gpsQuality.quality === 'GOOD' ? 'bg-emerald-500 animate-pulse' :
+                gpsQuality.quality === 'MODERATE' ? 'bg-amber-500' : 'bg-rose-500'
+              }`} />
+              <span className="text-gray-300 font-medium">GPS Status:</span>
+              <span className={`font-semibold ${
+                gpsQuality.quality === 'EXCELLENT' || gpsQuality.quality === 'GOOD' ? 'text-emerald-400' :
+                gpsQuality.quality === 'MODERATE' ? 'text-amber-400' : 'text-rose-400'
+              }`}>
+                {gpsQuality.quality} ({currentPosition ? `±${Math.round(currentPosition.accuracy)}m` : 'Acquiring...'})
+              </span>
+            </div>
+
+            {currentPosition && (
+              <div className="text-gray-400 font-mono">
+                {currentPosition.lat.toFixed(5)}, {currentPosition.lng.toFixed(5)}
+              </div>
+            )}
+
+            <button
+              onClick={() => setShowSimControls(!showSimControls)}
+              className="text-xs text-primary-400 hover:text-primary-300 underline font-medium"
+            >
+              {showSimControls ? 'Hide Laptop Testing Simulator' : 'Show Laptop Testing Simulator'}
+            </button>
+          </div>
+
+          {/* Route Simulation Panel (Laptop Testing - Section 16) */}
+          <AnimatePresence>
+            {showSimControls && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="glass-card p-4 rounded-xl border border-primary-500/30 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-primary-400" />
+                    <span className="font-semibold text-sm text-gray-200">Laptop Testing: Pedestrian Route Simulator</span>
                   </div>
-                  <div className="bg-white/[0.03] rounded-lg p-3">
-                    <span className="text-gray-500">Longitude:</span>{' '}
-                    <span className="text-cyan-400 font-mono">{location.lng.toFixed(6)}</span>
+                  <span className="text-xs text-gray-400">Simulates walking coordinates along route</span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    onClick={handleToggleSimulation}
+                    disabled={!route}
+                    className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
+                      isSimulating
+                        ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                        : 'bg-primary-600 hover:bg-primary-500 disabled:opacity-40 text-white'
+                    }`}
+                  >
+                    {isSimulating ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                    {isSimulating ? 'Pause Simulator' : 'Start Walking Simulator'}
+                  </button>
+
+                  <button
+                    onClick={() => navigationEngine.simulateDeviation()}
+                    disabled={!isSimulating}
+                    className="px-3 py-2 rounded-lg text-xs font-semibold bg-navy-800 hover:bg-navy-700 disabled:opacity-30 border border-white/10 text-gray-300"
+                  >
+                    Simulate Off-Route Deviation
+                  </button>
+
+                  <div className="flex items-center gap-1.5 ml-auto text-xs text-gray-400">
+                    <span>Speed:</span>
+                    {[1, 2, 4].map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => handleSimSpeedChange(s)}
+                        className={`px-2 py-1 rounded border text-xs font-mono ${
+                          simSpeed === s ? 'bg-primary-500 border-primary-400 text-white' : 'bg-navy-900 border-white/10 text-gray-400'
+                        }`}
+                      >
+                        {s}x
+                      </button>
+                    ))}
                   </div>
                 </div>
-              ) : (
-                <p className="text-gray-500 text-sm">Location not available</p>
-              )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
 
-              {error && (
-                <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-lg p-3 text-red-400 text-xs flex items-center gap-2">
-                  <AlertCircle className="w-3 h-3 flex-shrink-0" /> {error}
-                </div>
-              )}
+        {/* Right Column: Destination Search & Turn Guidance */}
+        <div className="space-y-5">
+          {/* Destination Search Box */}
+          <div className="glass-card p-5 rounded-2xl border border-white/10 relative">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-2">
+              <MapPin className="w-4 h-4 text-primary-400" />
+              Destination
+            </h2>
 
-              <button onClick={getLocation} disabled={loading} className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-full text-sm bg-cyan-400/20 text-cyan-400 border border-cyan-400/30 hover:bg-cyan-400/30 disabled:opacity-40 transition-all">
-                <Locate className="w-4 h-4" /> Center on Me
+            <div className="relative">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder="Search place, college, library..."
+                className="w-full bg-navy-900/90 border border-white/15 rounded-xl px-4 py-3 pl-10 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                aria-label="Enter walking destination"
+              />
+              <Search className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
+            </div>
+
+            {/* Suggestions Dropdown */}
+            {searchResults.length > 0 && (
+              <div className="mt-2 rounded-xl bg-navy-900/95 border border-white/15 overflow-hidden shadow-2xl divide-y divide-white/5 z-20">
+                {searchResults.map((item, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSelectDestination(item)}
+                    className="w-full text-left p-3 hover:bg-primary-600/20 text-xs transition-colors flex items-start gap-2.5"
+                  >
+                    <MapPin className="w-4 h-4 text-primary-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <div className="font-semibold text-gray-200">{item.name}</div>
+                      <div className="text-gray-400 text-[11px] line-clamp-1">{item.displayName}</div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {isSearching && (
+              <div className="text-xs text-primary-400 flex items-center gap-2 mt-2">
+                <span className="w-3 h-3 border-2 border-primary-400 border-t-transparent rounded-full animate-spin" />
+                Searching OpenStreetMap...
+              </div>
+            )}
+
+            {errorMessage && (
+              <div className="mt-3 p-3 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs">
+                {errorMessage}
+              </div>
+            )}
+          </div>
+
+          {/* Active Turn-by-Turn Card */}
+          <div className="glass-card p-5 rounded-2xl border border-white/10 space-y-4">
+            <div className="flex items-center justify-between border-b border-white/10 pb-3">
+              <div className="flex items-center gap-2">
+                <Compass className="w-4 h-4 text-primary-400" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                  {mode === 'NAVIGATING' ? 'Live Walking Guidance' : 'Route Overview'}
+                </span>
+              </div>
+
+              <button
+                onClick={toggleMute}
+                className={`p-1.5 rounded-lg border text-xs transition-all ${
+                  speechMuted ? 'bg-rose-500/20 border-rose-500/40 text-rose-300' : 'bg-navy-800 border-white/10 text-gray-300'
+                }`}
+                aria-label={speechMuted ? 'Unmute voice navigation' : 'Mute voice navigation'}
+                title={speechMuted ? 'Unmute' : 'Mute'}
+              >
+                {speechMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
             </div>
 
-            {/* Destination Search */}
-            <div className="glass-card p-5">
-              <h3 className="font-display text-lg font-semibold mb-3 flex items-center gap-2">
-                <Navigation2 className="w-5 h-5 text-purple-400" /> Find Destination
-              </h3>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => onSearchInput(e.target.value)}
-                  placeholder="Search a place..."
-                  className="w-full pl-10 pr-4 py-2.5 bg-white/[0.03] border border-white/10 rounded-xl text-sm text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400/40"
-                  aria-label="Search destination"
-                />
-                {searching && (
-                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-cyan-400 animate-spin" />
-                )}
+            {progress && progress.currentStep ? (
+              <div className="space-y-4">
+                {/* Primary Maneuver Card */}
+                <div className="p-4 rounded-xl bg-primary-600/15 border border-primary-500/30 flex items-start gap-4">
+                  <div className="p-3 rounded-xl bg-primary-500/20 border border-primary-400/40">
+                    {renderManeuverIcon(progress.currentStep.maneuver)}
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-2xl font-black text-white tracking-tight">
+                      {formatDistance(progress.distanceToNextTurnMeters)}
+                    </div>
+                    <div className="text-sm font-medium text-primary-200 mt-1 leading-snug">
+                      {progress.currentStep.instruction}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Remaining Route Stats */}
+                <div className="grid grid-cols-2 gap-3 text-center">
+                  <div className="p-3 rounded-xl bg-navy-900/60 border border-white/5">
+                    <div className="text-xs text-gray-400 flex items-center justify-center gap-1 mb-1">
+                      <Footprints className="w-3.5 h-3.5" /> Remaining
+                    </div>
+                    <div className="text-lg font-bold text-gray-200">
+                      {formatDistance(progress.distanceRemainingMeters)}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-navy-900/60 border border-white/5">
+                    <div className="text-xs text-gray-400 flex items-center justify-center gap-1 mb-1">
+                      <Clock className="w-3.5 h-3.5" /> Est. Time
+                    </div>
+                    <div className="text-lg font-bold text-gray-200">
+                      {formatDuration(progress.estimatedTimeRemainingSeconds)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Repeat Instruction Button */}
+                <button
+                  onClick={handleRepeatDirection}
+                  className="w-full py-2.5 px-4 rounded-xl bg-navy-800 hover:bg-navy-700 border border-white/10 text-xs font-semibold text-gray-200 flex items-center justify-center gap-2 transition-all"
+                >
+                  <Volume2 className="w-4 h-4 text-primary-400" />
+                  Repeat Last Direction
+                </button>
               </div>
-
-              {/* Search results dropdown */}
-              <AnimatePresence>
-                {searchResults.length > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    className="mt-2 bg-[#0f1428] border border-white/10 rounded-xl overflow-hidden max-h-48 overflow-y-auto"
-                  >
-                    {searchResults.map((r, i) => (
-                      <button
-                        key={i}
-                        onClick={() => selectDestination(r)}
-                        className="w-full text-left px-4 py-3 text-xs text-gray-300 hover:bg-cyan-400/10 hover:text-white border-b border-white/5 last:border-b-0 transition-colors"
-                      >
-                        <MapPin className="inline w-3 h-3 text-cyan-400 mr-1.5" />
-                        {r.display_name.length > 80 ? r.display_name.slice(0, 80) + '…' : r.display_name}
-                      </button>
-                    ))}
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Route Info */}
-            {routeLoading && (
-              <div className="glass-card p-5 flex items-center justify-center gap-2 text-cyan-400 text-sm">
-                <Loader2 className="w-4 h-4 animate-spin" /> Computing walking route...
+            ) : (
+              <div className="text-center py-8 text-gray-400 text-xs space-y-2">
+                <Navigation2 className="w-8 h-8 text-gray-600 mx-auto" />
+                <p>Choose a destination on the map or type in search to preview walking directions.</p>
               </div>
             )}
 
-            {routeData && (
-              <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-card p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="font-display text-lg font-semibold flex items-center gap-2">
-                    <Route className="w-5 h-5 text-green-400" /> Route
-                  </h3>
-                  <button onClick={clearRoute} className="text-gray-500 hover:text-red-400 transition-colors" aria-label="Clear route">
-                    <X className="w-4 h-4" />
+            {/* Action Buttons */}
+            <div className="pt-2 flex flex-col gap-2">
+              {mode === 'ROUTE_LOADED' && (
+                <button
+                  onClick={handleStart}
+                  className="w-full py-3.5 px-4 rounded-xl bg-primary-600 hover:bg-primary-500 font-bold text-sm text-white flex items-center justify-center gap-2 shadow-lg shadow-primary-900/50 transition-all"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  Start Navigation
+                </button>
+              )}
+
+              {mode === 'NAVIGATING' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={handlePause}
+                    className="py-3 px-4 rounded-xl bg-amber-600 hover:bg-amber-500 font-bold text-xs text-white flex items-center justify-center gap-2 transition-all"
+                  >
+                    <Pause className="w-4 h-4" /> Pause
+                  </button>
+                  <button
+                    onClick={handleStop}
+                    className="py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 font-bold text-xs text-white flex items-center justify-center gap-2 transition-all"
+                  >
+                    <Square className="w-4 h-4 fill-current" /> Stop
                   </button>
                 </div>
+              )}
 
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <div className="bg-white/[0.03] rounded-lg p-3 text-center">
-                    <Ruler className="w-4 h-4 text-cyan-400 mx-auto mb-1" />
-                    <div className="text-lg font-bold text-white">{routeData.distanceKm}</div>
-                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">km</div>
-                  </div>
-                  <div className="bg-white/[0.03] rounded-lg p-3 text-center">
-                    <Clock className="w-4 h-4 text-purple-400 mx-auto mb-1" />
-                    <div className="text-lg font-bold text-white">{routeData.durationMin}</div>
-                    <div className="text-[10px] text-gray-500 uppercase tracking-wider">minutes</div>
-                  </div>
+              {mode === 'PAUSED' && (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={handleResume}
+                    className="py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 font-bold text-xs text-white flex items-center justify-center gap-2 transition-all"
+                  >
+                    <Play className="w-4 h-4 fill-current" /> Resume
+                  </button>
+                  <button
+                    onClick={handleStop}
+                    className="py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 font-bold text-xs text-white flex items-center justify-center gap-2 transition-all"
+                  >
+                    <Square className="w-4 h-4 fill-current" /> Stop
+                  </button>
                 </div>
+              )}
 
-                {/* Read aloud */}
+              {route && (
                 <button
-                  onClick={() => speak(`Walking route: ${routeData.distanceKm} kilometers, approximately ${routeData.durationMin} minutes.`)}
-                  className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-full text-xs bg-green-500/20 text-green-400 border border-green-400/30 hover:bg-green-500/30 transition-all mb-3"
+                  onClick={handleRecalculate}
+                  className="w-full py-2.5 px-4 rounded-xl bg-navy-900 hover:bg-navy-800 border border-white/10 text-xs font-semibold text-gray-300 flex items-center justify-center gap-2 transition-all"
                 >
-                  <Volume2 className="w-3.5 h-3.5" /> Read Route Aloud
+                  <RotateCcw className="w-3.5 h-3.5 text-gray-400" />
+                  Recalculate Route
                 </button>
-
-                {/* Turn-by-turn steps */}
-                {routeData.steps.length > 0 && (
-                  <>
-                    <button
-                      onClick={() => setShowSteps(!showSteps)}
-                      className="w-full flex items-center justify-between text-xs text-gray-400 hover:text-white transition-colors mb-2"
-                    >
-                      <span>{routeData.steps.length} turn-by-turn steps</span>
-                      <ChevronDown className={`w-4 h-4 transition-transform ${showSteps ? 'rotate-180' : ''}`} />
-                    </button>
-                    <AnimatePresence>
-                      {showSteps && (
-                        <motion.div
-                          initial={{ height: 0, opacity: 0 }}
-                          animate={{ height: 'auto', opacity: 1 }}
-                          exit={{ height: 0, opacity: 0 }}
-                          className="overflow-hidden"
-                        >
-                          <div className="space-y-1 max-h-48 overflow-y-auto">
-                            {routeData.steps.map((step, i) => (
-                              <div key={i} className="flex items-start gap-2 text-xs text-gray-300 bg-white/[0.02] rounded-lg px-3 py-2">
-                                <span className="text-cyan-400 font-mono w-5 flex-shrink-0">{i + 1}.</span>
-                                <span className="capitalize">{step.instruction}</span>
-                                <span className="ml-auto text-gray-500 flex-shrink-0">{step.distanceM}m</span>
-                              </div>
-                            ))}
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </>
-                )}
-              </motion.div>
-            )}
-
-            {/* Safety Notice */}
-            <div className="glass-card p-4 bg-yellow-500/5 border-yellow-500/10">
-              <p className="text-yellow-400/80 text-xs leading-relaxed">
-                ⚠️ Navigation data is for reference only. GPS directions do not confirm a physically safe walking path. Always use caution and assistance when needed.
-              </p>
+              )}
             </div>
-          </motion.div>
+          </div>
+
+          {/* Voice Command Hints */}
+          <div className="p-4 rounded-xl bg-navy-900/40 border border-white/5 space-y-2 text-xs text-gray-400">
+            <div className="font-semibold text-gray-300 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-primary-400" /> NAVI Voice Commands:
+            </div>
+            <ul className="space-y-1 list-disc list-inside text-gray-400 text-[11px]">
+              <li>"Start navigation" / "Stop navigation"</li>
+              <li>"Take me to the library" / "Navigate to college"</li>
+              <li>"How far is the next turn?"</li>
+              <li>"Repeat the last direction"</li>
+              <li>"Where am I according to GPS?"</li>
+            </ul>
+          </div>
         </div>
       </div>
     </div>

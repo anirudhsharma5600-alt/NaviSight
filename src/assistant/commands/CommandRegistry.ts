@@ -498,6 +498,89 @@ export const COMMAND_CATALOG: CommandDefinition[] = [
     keywords: ['show camera status', 'camera diagnostics'],
   },
 
+  // ─── L. REAL PEDESTRIAN VOICE NAVIGATION ───
+  {
+    intent: 'navigation.start',
+    category: 'NAVIGATION',
+    description: 'Start live GPS walking navigation.',
+    parameters: [],
+    keywords: ['start navigation', 'start walking', 'start route', 'navigation shuru karo', 'chalu karo navigation', 'rasta chalu karo'],
+  },
+  {
+    intent: 'navigation.stop',
+    category: 'NAVIGATION',
+    description: 'Stop active walking navigation.',
+    parameters: [],
+    isEmergencyAction: true,
+    keywords: ['stop navigation', 'cancel navigation', 'stop route', 'navigation band karo', 'roko navigation'],
+  },
+  {
+    intent: 'navigation.pause',
+    category: 'NAVIGATION',
+    description: 'Pause active walking navigation.',
+    parameters: [],
+    keywords: ['pause navigation', 'pause route', 'ruk jao', 'pause walking'],
+  },
+  {
+    intent: 'navigation.resume',
+    category: 'NAVIGATION',
+    description: 'Resume paused walking navigation.',
+    parameters: [],
+    keywords: ['resume navigation', 'continue navigation', 'continue route', 'aage badho', 'shuru karo dobara'],
+  },
+  {
+    intent: 'navigation.setDestination',
+    category: 'NAVIGATION',
+    description: 'Set a walking destination and compute a pedestrian route.',
+    parameters: [
+      { name: 'destination', type: 'string', required: true, description: 'Destination place name or landmark' }
+    ],
+    keywords: ['navigate to', 'take me to', 'find a walking route to', 'walking route to', 'rasta batao', 'le chalo'],
+  },
+  {
+    intent: 'navigation.repeatInstruction',
+    category: 'NAVIGATION',
+    description: 'Repeat the last navigation instruction or direction.',
+    parameters: [],
+    keywords: ['repeat the last direction', 'what is my next instruction', 'repeat direction', 'phir se batao rasta', 'agla mod kya hai'],
+  },
+  {
+    intent: 'navigation.currentLocation',
+    category: 'NAVIGATION',
+    description: 'Report current location and GPS accuracy.',
+    parameters: [],
+    keywords: ['where am i according to gps', 'where am i', 'what is my location', 'meri location kya hai', 'mai kahan hu'],
+  },
+  {
+    intent: 'navigation.remainingDistance',
+    category: 'NAVIGATION',
+    description: 'Report remaining walking distance to destination.',
+    parameters: [],
+    keywords: ['how much distance is remaining', 'remaining distance', 'how far is destination', 'kitni door hai', 'kitna bacha hai'],
+  },
+  {
+    intent: 'navigation.nextTurn',
+    category: 'NAVIGATION',
+    description: 'Report the next upcoming turn and distance.',
+    parameters: [],
+    keywords: ['how far is the next turn', 'next turn', 'agla mod kitni door hai', 'when is next turn', 'next turn distance'],
+  },
+  {
+    intent: 'navigation.recalculateRoute',
+    category: 'NAVIGATION',
+    description: 'Recalculate the pedestrian route from current position.',
+    parameters: [],
+    keywords: ['recalculate my route', 'recalculate route', 'rasta badlo', 'dobara rasta banao', 'recalculate'],
+  },
+  {
+    intent: 'navigation.help',
+    category: 'NAVIGATION',
+    description: 'List available pedestrian navigation voice commands.',
+    parameters: [],
+    keywords: ['navigation help', 'how to navigate', 'navigation commands', 'rasta madad'],
+  },
+
+
   // ─── K. CONFIRMATION & AMBIGUOUS CONTROLS ───
   {
     intent: 'CONFIRM_YES',

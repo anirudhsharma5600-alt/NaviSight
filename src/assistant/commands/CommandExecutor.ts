@@ -28,6 +28,8 @@ import { SpeechOutput } from '../voice/SpeechOutput'
 import { VoiceLanguageManager } from '../voice/VoiceLanguageManager'
 import { VoiceStateManager, type AssistantLanguage } from '../voice/VoiceStateManager'
 import { NaviToolRouter } from '../NaviToolRouter'
+import { navigationEngine } from '../../services/navigation/navigationEngine'
+import { geocodingService } from '../../services/navigation/geocodingService'
 import type { ParsedCommandIntent } from './IntentClassifier'
 
 export interface ExecutionResult {
@@ -729,6 +731,186 @@ export class CommandExecutorClass {
         if (this.navigateFn) this.navigateFn('/dashboard')
         return { success: true, spokenResponse: 'Showing camera status on dashboard.', actionTaken: 'NAV_CAMERA_STATUS' }
       }
+
+      // ─── L. REAL PEDESTRIAN VOICE NAVIGATION ───
+      case 'navigation.start': {
+        const success = navigationEngine.startNavigation()
+        if (!success) {
+          return {
+            success: false,
+            spokenResponse: 'Please choose a destination first. Say, navigate to the library.',
+            actionTaken: 'NAVIGATION_NO_DESTINATION',
+          }
+        }
+        if (this.navigateFn) this.navigateFn('/navigation')
+        return {
+          success: true,
+          spokenResponse: 'Walking route started. Please proceed with caution.',
+          actionTaken: 'NAVIGATION_STARTED',
+        }
+      }
+
+      case 'navigation.stop': {
+        navigationEngine.stopNavigation()
+        return {
+          success: true,
+          spokenResponse: 'Navigation stopped.',
+          actionTaken: 'NAVIGATION_STOPPED',
+        }
+      }
+
+      case 'navigation.pause': {
+        navigationEngine.pauseNavigation()
+        return {
+          success: true,
+          spokenResponse: 'Navigation paused.',
+          actionTaken: 'NAVIGATION_PAUSED',
+        }
+      }
+
+      case 'navigation.resume': {
+        navigationEngine.resumeNavigation()
+        return {
+          success: true,
+          spokenResponse: 'Navigation resumed.',
+          actionTaken: 'NAVIGATION_RESUMED',
+        }
+      }
+
+      case 'navigation.setDestination': {
+        const destQuery = intent.params.destination
+        if (!destQuery) {
+          return {
+            success: false,
+            spokenResponse: 'Where would you like to walk? Please say the destination name.',
+            actionTaken: 'DESTINATION_MISSING',
+          }
+        }
+
+        try {
+          const results = await geocodingService.searchPlaces(destQuery)
+          if (results.length === 0) {
+            return {
+              success: false,
+              spokenResponse: `Could not find location for ${destQuery}. Please try another destination name.`,
+              actionTaken: 'DESTINATION_NOT_FOUND',
+            }
+          }
+
+          const top = results[0]
+          const route = await navigationEngine.setDestination({ lat: top.lat, lng: top.lng }, top.name)
+          if (this.navigateFn) this.navigateFn('/navigation')
+
+          const distKm = (route.totalDistanceMeters / 1000).toFixed(1)
+          const durationMin = Math.round(route.totalDurationSeconds / 60)
+          return {
+            success: true,
+            spokenResponse: `Walking route to ${top.name} mapped. Approximately ${distKm} kilometres, ${durationMin} minutes. Say start navigation to begin.`,
+            actionTaken: 'DESTINATION_SET',
+            data: { destination: top.name, routeId: route.id },
+          }
+        } catch (err: any) {
+          return {
+            success: false,
+            spokenResponse: `Could not calculate walking route to ${destQuery}: ${err.message}`,
+            actionTaken: 'ROUTING_FAILED',
+          }
+        }
+      }
+
+      case 'navigation.repeatInstruction': {
+        const prog = navigationEngine.getProgress()
+        if (prog && prog.currentStep) {
+          const dist = Math.round(prog.distanceToNextTurnMeters)
+          const spoken = `${prog.currentStep.instruction} in ${dist} metres.`
+          navigationEngine.repeatInstruction()
+          return {
+            success: true,
+            spokenResponse: spoken,
+            actionTaken: 'INSTRUCTION_REPEATED',
+          }
+        }
+        return {
+          success: true,
+          spokenResponse: 'No active turn instruction at this moment.',
+          actionTaken: 'NO_INSTRUCTION',
+        }
+      }
+
+      case 'navigation.currentLocation': {
+        const pos = navigationEngine.getCurrentPosition()
+        if (!pos) {
+          return {
+            success: false,
+            spokenResponse: 'Acquiring GPS location. Please wait a moment.',
+            actionTaken: 'GPS_ACQUIRING',
+          }
+        }
+        const quality = navigationEngine.getGPSQuality()
+        const placeName = await geocodingService.reverseGeocode({ lat: pos.lat, lng: pos.lng })
+        const spoken = `You are near ${placeName}. GPS accuracy is approximately ${Math.round(pos.accuracy)} metres.`
+        return {
+          success: true,
+          spokenResponse: spoken,
+          actionTaken: 'LOCATION_REPORTED',
+          data: { lat: pos.lat, lng: pos.lng, quality: quality.quality },
+        }
+      }
+
+      case 'navigation.remainingDistance': {
+        const prog = navigationEngine.getProgress()
+        if (!prog) {
+          return {
+            success: false,
+            spokenResponse: 'No active walking navigation in progress.',
+            actionTaken: 'NO_ACTIVE_NAVIGATION',
+          }
+        }
+        const dist = prog.distanceRemainingMeters >= 1000
+          ? `${(prog.distanceRemainingMeters / 1000).toFixed(1)} kilometres`
+          : `${Math.round(prog.distanceRemainingMeters)} metres`
+        const min = Math.round(prog.estimatedTimeRemainingSeconds / 60)
+        return {
+          success: true,
+          spokenResponse: `Approximately ${dist} remaining, about ${min} minutes walking.`,
+          actionTaken: 'DISTANCE_REPORTED',
+        }
+      }
+
+      case 'navigation.nextTurn': {
+        const prog = navigationEngine.getProgress()
+        if (!prog || !prog.currentStep) {
+          return {
+            success: false,
+            spokenResponse: 'No active turn instruction available.',
+            actionTaken: 'NO_TURN_AVAILABLE',
+          }
+        }
+        const dist = Math.round(prog.distanceToNextTurnMeters)
+        return {
+          success: true,
+          spokenResponse: `Next turn is ${prog.currentStep.instruction} in ${dist} metres.`,
+          actionTaken: 'NEXT_TURN_REPORTED',
+        }
+      }
+
+      case 'navigation.recalculateRoute': {
+        const ok = await navigationEngine.recalculateRoute()
+        return {
+          success: ok,
+          spokenResponse: ok ? 'Route recalculated from your current position.' : 'Could not recalculate walking route.',
+          actionTaken: ok ? 'ROUTE_RECALCULATED' : 'RECALCULATION_FAILED',
+        }
+      }
+
+      case 'navigation.help': {
+        return {
+          success: true,
+          spokenResponse: 'Navigation voice commands: Say start navigation, stop navigation, take me to library, how far is the next turn, where am I according to GPS, or recalculate route.',
+          actionTaken: 'NAVIGATION_HELP',
+        }
+      }
+
 
       // ─── K. CONFIRMATION RESPONSES ───
       case 'CONFIRM_YES': {

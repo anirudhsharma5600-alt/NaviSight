@@ -463,6 +463,92 @@ export class IntentClassifierClass {
         /\b(show\s*camera\s*status|camera\s*diagnostics)\b/i,
       ],
     },
+    // ─── REAL PEDESTRIAN VOICE NAVIGATION ───
+    {
+      intent: 'navigation.start',
+      patterns: [
+        /\b(start|begin)\s*(the\s*)?(walking|pedestrian\s*)?navigation\b/i,
+        /\b(start\s*walking|start\s*route|start\s*navigation)\b/i,
+        /\b(shuru\s*karo\s*navigation|navigation\s*shuru(\s*karo)?|chalo\s*shuru(\s*karo)?)\b/i,
+        /\b(नेविगेशन\s*शुरू|रास्ता\s*चालू|ਨੇਵੀਗੇਸ਼ਨ\s*ਸ਼ੁਰੂ)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.stop',
+      patterns: [
+        /\b(stop|cancel|end|terminate)\s*(the\s*)?(walking\s*)?navigation\b/i,
+        /\b(stop\s*route|cancel\s*route|stop\s*navigation)\b/i,
+        /\b(navigation\s*(band\s*karo|roko|cancel\s*karo)|band\s*karo\s*navigation)\b/i,
+        /\b(नेविगेशन\s*बंद|रास्ता\s*रोको|ਨੇਵੀਗੇਸ਼ਨ\s*ਬੰਦ)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.pause',
+      patterns: [
+        /\b(pause\s*(the\s*)?(walking\s*)?navigation|pause\s*route|pause\s*walking)\b/i,
+        /\b(ruk\s*jao|pause\s*karo|thoda\s*ruko)\b/i,
+        /\b(नेविगेशन\s*रोकें|ਨੇਵੀਗੇਸ਼ਨ\s*ਰੋਕੋ)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.resume',
+      patterns: [
+        /\b(resume\s*(the\s*)?(walking\s*)?navigation|resume\s*route|continue\s*navigation|continue\s*route)\b/i,
+        /\b(phir\s*se\s*shuru(\s*karo)?|aage\s*badho)\b/i,
+        /\b(नेविगेशन\s*जारी|ਨੇਵੀਗੇਸ਼ਨ\s*ਜਾਰੀ)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.setDestination',
+      patterns: [
+        /\b(navigate\s*to|take\s*me\s*to|find\s*(a\s*)?walking\s*route\s*to|walking\s*route\s*to|directions?\s*to)\s+(.+)/i,
+        /\b(.+)\s*(ka\s*rasta\s*batao|le\s*chalo|chalo|jana\s*hai)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.repeatInstruction',
+      patterns: [
+        /\b(repeat\s*(the\s*)?(last\s*)?direction|repeat\s*instruction|what\s*is\s*my\s*next\s*instruction|repeat\s*that)\b/i,
+        /\b(kya\s*bola|dobara\s*bolo|phir\s*se\s*bolo)\b/i,
+        /\b(पिछला\s*निर्देश\s*दोहराएं|ਦਿਸ਼ਾ\s*ਦੁਹਰਾਓ)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.currentLocation',
+      patterns: [
+        /\b(where\s*am\s*i\s*(according\s*to\s*gps)?|what('s| is)\s*my\s*(current\s*)?(location|position|coordinates?)|current\s*location)\b/i,
+        /\b(meri\s*location|mai\s*kahan\s*hu|main\s*kahan\s*hoon|mera\s*location\s*kya\s*hai)\b/i,
+        /\b(मेरी\s*लोकेशन|ਮੇਰੀ\s*ਲੋਕੇਸ਼ਨ)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.remainingDistance',
+      patterns: [
+        /\b(how\s*much\s*distance\s*is\s*remaining|remaining\s*distance|how\s*far\s*is\s*(the\s*)?destination|how\s*much\s*(is\s*)?left|how\s*far)\b/i,
+        /\b(kitni\s*door|kitna\s*bacha|kitna\s*door\s*hai)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.nextTurn',
+      patterns: [
+        /\b(how\s*far\s*is\s*(the\s*)?next\s*turn|what('s| is)\s*my\s*next\s*turn|next\s*turn)\b/i,
+        /\b(agla\s*mod|agla\s*turn)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.recalculateRoute',
+      patterns: [
+        /\b(recalculate\s*(my\s*)?route|reroute|recalculate\s*navigation)\b/i,
+        /\b(dobara\s*rasta\s*banao|rasta\s*badlo|naya\s*rasta|naya\s*route)\b/i,
+      ],
+    },
+    {
+      intent: 'navigation.help',
+      patterns: [
+        /\b(navigation\s*help|how\s*to\s*navigate|help\s*with\s*navigation|navigation\s*commands)\b/i,
+      ],
+    },
+
   ]
 
   /**
@@ -623,7 +709,22 @@ export class IntentClassifierClass {
   private extractParameters(intent: string, raw: string, normalized: string): Record<string, any> {
     const params: Record<string, any> = {}
 
-    if (intent === 'REMEMBER_ROUTE_START' || intent === 'REMEMBER_ROUTE_STOP') {
+    if (intent === 'navigation.setDestination') {
+      const m = raw.match(/(?:navigate\s+to|take\s+me\s+to|find\s+(?:a\s+)?walking\s+route\s+to|walking\s+route\s+to|directions?\s+to|route\s+to)\s+([a-z0-9\s,.-]+)$/i)
+      if (m && m[1]) {
+        params.destination = m[1].replace(/^(the|a|an)\s+/i, '').trim()
+      } else {
+        const hindiMatch = raw.match(/([a-z0-9\s,.-]+?)\s*(?:le\s+chalo|chalo|ka\s+rasta|jana\s+hai)$/i)
+        if (hindiMatch && hindiMatch[1]) {
+          params.destination = hindiMatch[1].replace(/^(the|a|an)\s+/i, '').trim()
+        } else {
+          const toMatch = raw.match(/\bto\s+([a-z0-9\s,.-]+)$/i)
+          if (toMatch && toMatch[1]) {
+            params.destination = toMatch[1].replace(/^(the|a|an)\s+/i, '').trim()
+          }
+        }
+      }
+    } else     if (intent === 'REMEMBER_ROUTE_START' || intent === 'REMEMBER_ROUTE_STOP') {
       const m = raw.match(/(?:as|called|name)\s+([a-z0-9\s]+)$/i)
       if (m && m[1]) {
         params.routeName = m[1].trim()

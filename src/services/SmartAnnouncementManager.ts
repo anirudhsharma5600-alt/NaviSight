@@ -174,6 +174,10 @@ class SmartAnnouncementManagerClass {
 
   // ─── Instant Silence ───
 
+  public silence(): void {
+    this.stopAll()
+  }
+
   public stopAll(): void {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       try {
