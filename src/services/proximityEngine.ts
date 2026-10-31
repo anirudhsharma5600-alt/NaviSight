@@ -66,7 +66,8 @@ let config: ProximityConfig = {
 const sizeHistory: Map<string, number[]> = new Map()
 // Persistence counter: key -> consecutive frame detections
 const persistenceCount: Map<string, number> = new Map()
-const lastTrackState: Map<string, ProximityState> = new Map()
+const lastTrackState: Map<string, string> = new Map()
+const lastSeenAt: Map<string, number> = new Map()
 // One short urgent sound at a state change, with a global safety cooldown.
 let lastBeepTime = 0
 let lastVoiceAlertTime = 0
@@ -89,6 +90,27 @@ const THRESHOLDS = {
   low: { closeArea: 0.38, closeHeight: 0.70, medArea: 0.15, medHeight: 0.40 },
   medium: { closeArea: 0.26, closeHeight: 0.55, medArea: 0.08, medHeight: 0.30 },
   high: { closeArea: 0.18, closeHeight: 0.45, medArea: 0.05, medHeight: 0.22 },
+}
+
+const HINDI_OBJECT_NAMES: Record<string, string> = {
+  person: 'व्यक्ति', bicycle: 'साइकिल', car: 'कार', motorcycle: 'मोटरसाइकिल',
+  airplane: 'हवाई जहाज़', bus: 'बस', train: 'ट्रेन', truck: 'ट्रक', boat: 'नाव',
+  'traffic light': 'ट्रैफ़िक लाइट', 'fire hydrant': 'फ़ायर हाइड्रेंट', 'stop sign': 'स्टॉप साइन',
+  'parking meter': 'पार्किंग मीटर', bench: 'बेंच', bird: 'पक्षी', cat: 'बिल्ली', dog: 'कुत्ता',
+  horse: 'घोड़ा', sheep: 'भेड़', cow: 'गाय', elephant: 'हाथी', bear: 'भालू', zebra: 'ज़ेब्रा',
+  giraffe: 'जिराफ़', backpack: 'बैग', umbrella: 'छाता', handbag: 'हैंडबैग', tie: 'टाई',
+  suitcase: 'सूटकेस', frisbee: 'फ्रिस्बी', skis: 'स्की', snowboard: 'स्नोबोर्ड',
+  'sports ball': 'गेंद', kite: 'पतंग', 'baseball bat': 'बेसबॉल बैट', 'baseball glove': 'बेसबॉल ग्लव',
+  skateboard: 'स्केटबोर्ड', surfboard: 'सर्फ़बोर्ड', 'tennis racket': 'टेनिस रैकेट',
+  bottle: 'बोतल', 'wine glass': 'गिलास', cup: 'कप', fork: 'कांटा', knife: 'चाकू', spoon: 'चम्मच',
+  bowl: 'कटोरा', banana: 'केला', apple: 'सेब', sandwich: 'सैंडविच', orange: 'संतरा',
+  broccoli: 'ब्रोकली', carrot: 'गाजर', 'hot dog': 'हॉट डॉग', pizza: 'पिज़्ज़ा', donut: 'डोनट',
+  cake: 'केक', chair: 'कुर्सी', couch: 'सोफ़ा', 'potted plant': 'गमले का पौधा', bed: 'बिस्तर',
+  'dining table': 'मेज़', toilet: 'टॉयलेट', tv: 'टीवी', laptop: 'लैपटॉप', mouse: 'माउस',
+  remote: 'रिमोट', keyboard: 'कीबोर्ड', 'cell phone': 'मोबाइल फ़ोन', microwave: 'माइक्रोवेव',
+  oven: 'ओवन', toaster: 'टोस्टर', sink: 'सिंक', refrigerator: 'फ़्रिज', book: 'किताब',
+  clock: 'घड़ी', vase: 'फूलदान', scissors: 'कैंची', 'teddy bear': 'टेडी बियर',
+  'hair drier': 'हेयर ड्रायर', toothbrush: 'टूथब्रश',
 }
 
 // ─── Audio Context Unlock (Mandatory User Gesture) ───
@@ -246,7 +268,7 @@ export function processDetectionsForProximity(
   const alerts: ProximityAlert[] = []
 
   let highestPersonAlert: ProximityAlert | null = null
-  let strongestNewlyUrgentAlert: ProximityAlert | null = null
+  const newlyActionableAlerts: Array<{ alert: ProximityAlert; trackState: string }> = []
 
   for (const det of detections) {
     if (det.score < 0.55) continue
@@ -259,6 +281,7 @@ export function processDetectionsForProximity(
     // keep independent distance trends and never merge into one target.
     const key = `${det.id}`
     activeKeys.add(key)
+    lastSeenAt.set(key, now)
 
     // Increment persistence count
     const count = (persistenceCount.get(key) || 0) + 1
@@ -276,7 +299,9 @@ export function processDetectionsForProximity(
     let direction: ApproachDirection = 'STABLE'
     if (history.length >= 4) {
       const recentDiff = history[history.length - 1] - history[0]
-      const trendThreshold = Math.max(0.012, history[0] * 0.18)
+      // Smaller objects need a proportional threshold too; the previous
+      // absolute floor meant far-away objects almost never registered growth.
+      const trendThreshold = Math.max(0.002, history[0] * 0.12)
       if (recentDiff > trendThreshold) direction = 'APPROACHING'
       else if (recentDiff < -trendThreshold) direction = 'RECEDING'
     }
@@ -313,57 +338,70 @@ export function processDetectionsForProximity(
     }
 
     const isStableDetection = count >= 3
+    const trackState = isPerson
+      ? state
+      : direction === 'APPROACHING'
+        ? zone === 'NEAR' ? 'OBJECT_APPROACHING_NEAR' : 'OBJECT_APPROACHING'
+        : zone === 'NEAR' ? 'OBJECT_CLOSE' : 'OBJECT_CLEAR'
     const actionable = isStableDetection && (
       (isPerson && (state === 'PERSON_APPROACHING' || state === 'PERSON_APPEARS_CLOSE')) ||
-      (!isPerson && zone === 'NEAR' && direction === 'APPROACHING')
+      (!isPerson && (direction === 'APPROACHING' || zone === 'NEAR'))
     )
-    if (isStableDetection) {
-      const trackState = isPerson ? state : actionable ? 'PERSON_APPROACHING' : 'CLEAR'
-      const previousTrackState = lastTrackState.get(key)
-      if (
-        actionable &&
-        previousTrackState !== trackState &&
-        (!strongestNewlyUrgentAlert || closenessScore > strongestNewlyUrgentAlert.closenessScore)
-      ) {
-        strongestNewlyUrgentAlert = alert
-      }
+    const previousTrackState = lastTrackState.get(key)
+    if (actionable && previousTrackState !== trackState) {
+      newlyActionableAlerts.push({ alert, trackState })
+    } else if (!actionable) {
       lastTrackState.set(key, trackState)
     }
   }
 
   // Cleanup lost targets from history
   for (const [key] of sizeHistory.entries()) {
-    if (!activeKeys.has(key)) {
+    if (!activeKeys.has(key) && now - (lastSeenAt.get(key) || 0) > 1000) {
       sizeHistory.delete(key)
       persistenceCount.delete(key)
       lastTrackState.delete(key)
+      lastSeenAt.delete(key)
     }
   }
 
   currentState = highestPersonAlert?.state || 'CLEAR'
 
-  // Speak only when an independently tracked target enters an actionable
-  // state. Keep one voice alert and at most one urgent beep per cooldown.
-  if (strongestNewlyUrgentAlert) {
-    const enteredUrgentState = true
+  // Prioritize close targets, then announce one new transition at a time.
+  // Unspoken targets remain eligible on the next frame instead of being lost
+  // behind a person alert or the global speech cooldown.
+  newlyActionableAlerts.sort((a, b) =>
+    Number(b.alert.zone === 'NEAR') - Number(a.alert.zone === 'NEAR') ||
+    b.alert.closenessScore - a.alert.closenessScore,
+  )
+  const selected = newlyActionableAlerts[0]
+  const alertIsReadyToSpeak = selected && config.voiceEnabled && now - lastVoiceAlertTime >= 2500
+  if (selected && alertIsReadyToSpeak) {
+    const strongestNewlyUrgentAlert = selected.alert
     const position = config.language === 'hi'
       ? strongestNewlyUrgentAlert.position === 'LEFT' ? 'आपके बाईं ओर' : strongestNewlyUrgentAlert.position === 'RIGHT' ? 'आपके दाईं ओर' : 'सामने'
       : strongestNewlyUrgentAlert.position === 'LEFT' ? 'on your left' : strongestNewlyUrgentAlert.position === 'RIGHT' ? 'on your right' : 'ahead'
     const objectName = strongestNewlyUrgentAlert.isPerson
       ? (config.language === 'hi' ? 'एक व्यक्ति' : 'A person')
-      : (config.language === 'hi' ? strongestNewlyUrgentAlert.objectClass : `A ${strongestNewlyUrgentAlert.objectClass}`)
+      : config.language === 'hi'
+        ? (HINDI_OBJECT_NAMES[strongestNewlyUrgentAlert.objectClass] || strongestNewlyUrgentAlert.objectClass)
+        : `A ${strongestNewlyUrgentAlert.objectClass}`
+    const isClose = strongestNewlyUrgentAlert.zone === 'NEAR'
     const message = config.language === 'hi'
-      ? `${position} ${objectName} ${strongestNewlyUrgentAlert.state === 'PERSON_APPEARS_CLOSE' ? 'बहुत पास' : 'करीब आता हुआ'} दिखाई दे रहा है।`
-      : `${objectName} ${position} ${strongestNewlyUrgentAlert.state === 'PERSON_APPEARS_CLOSE' ? 'appears very close' : 'appears to be getting closer'}.`
+      ? strongestNewlyUrgentAlert.isPerson
+        ? `${position} ${objectName} ${isClose ? 'बहुत पास' : 'करीब आता हुआ'} दिखाई दे रहा है।`
+        : `${position} ${objectName} ${isClose ? 'बहुत पास है' : 'दिखाई दे रहा है'}${strongestNewlyUrgentAlert.direction === 'APPROACHING' ? ' और पास आता हुआ दिखाई दे रहा है' : ''}।`
+      : strongestNewlyUrgentAlert.isPerson
+        ? `${objectName} ${position} ${isClose ? 'appears very close' : 'appears to be getting closer'}.`
+        : `${objectName} ${position} ${strongestNewlyUrgentAlert.direction === 'APPROACHING' ? 'appears to be getting closer' : 'is very close'}.`
 
-    if (enteredUrgentState && config.voiceEnabled && now - lastVoiceAlertTime >= 6000) {
-      lastVoiceAlertTime = now
-      speak(message, config.language === 'hi' ? 'hi-IN' : 'en-US')
-    }
+    lastVoiceAlertTime = now
+    lastTrackState.set(`${strongestNewlyUrgentAlert.objectId}`, selected.trackState)
+    speak(message, config.language === 'hi' ? 'hi-IN' : 'en-US')
 
     if (
       strongestNewlyUrgentAlert.zone === 'NEAR' &&
-      enteredUrgentState &&
+      strongestNewlyUrgentAlert.direction === 'APPROACHING' &&
       now - lastBeepTime >= config.cooldownMs.critical
     ) {
       lastBeepTime = now
@@ -416,6 +454,7 @@ export function initProximityEngine(): void {
   sizeHistory.clear()
   persistenceCount.clear()
   lastTrackState.clear()
+  lastSeenAt.clear()
   lastBeepTime = 0
   lastVoiceAlertTime = 0
   currentState = 'CLEAR'

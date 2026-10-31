@@ -35,8 +35,14 @@ let model: cocoSsd.ObjectDetection | null = null
 let modelStatus: ModelStatus = 'idle'
 let config: DetectionConfig = { ...DEFAULT_CONFIG }
 let nextId = 1
-let previousDetections: Detection[] = []
 let modelLoadPromise: Promise<void> | null = null
+
+interface DetectionTrack {
+  detection: Detection
+  missedFrames: number
+}
+
+const activeTracks = new Map<number, DetectionTrack>()
 
 // ─── Listeners ───
 
@@ -137,35 +143,59 @@ function applyNMS(
 
 // ─── Temporal Tracking ───
 
-function assignIds(current: Detection[], previous: Detection[]): Detection[] {
-  if (!config.enableTracking || previous.length === 0) {
+function assignIds(current: Detection[]): Detection[] {
+  if (!config.enableTracking) {
+    activeTracks.clear()
     return current.map(d => ({ ...d, id: nextId++ }))
   }
 
+  const tracks = [...activeTracks.entries()]
   const used = new Set<number>()
+  const matched = new Set<number>()
   const result: Detection[] = []
 
-  for (const det of current) {
-    let bestMatch: Detection | null = null
-    let bestIOU = 0.3 // minimum IOU to consider a match
+  for (const detection of current) {
+    let bestId: number | null = null
+    let bestScore = 0.2
+    const [x, y, width, height] = detection.bbox
+    const centerX = x + width / 2
+    const centerY = y + height / 2
 
-    for (const prev of previous) {
-      if (used.has(prev.id)) continue
-      if (det.class !== prev.class) continue
+    for (const [id, track] of tracks) {
+      if (used.has(id) || track.missedFrames > 2) continue
+      const previous = track.detection
+      if (detection.class !== previous.class) continue
 
-      const iou = computeIOU(det.bbox, prev.bbox)
-      if (iou > bestIOU) {
-        bestIOU = iou
-        bestMatch = prev
+      const [prevX, prevY, prevWidth, prevHeight] = previous.bbox
+      const prevCenterX = prevX + prevWidth / 2
+      const prevCenterY = prevY + prevHeight / 2
+      const distance = Math.hypot(centerX - prevCenterX, centerY - prevCenterY)
+      const scale = Math.max(Math.hypot(width, height), Math.hypot(prevWidth, prevHeight))
+      const maxTravel = Math.max(48, scale * 0.75)
+      if (distance > maxTravel) continue
+
+      // IoU alone loses a track when a nearby object grows in the frame.
+      // Combine overlap with centre continuity and allow two missed frames.
+      const proximity = 1 - distance / maxTravel
+      const score = computeIOU(detection.bbox, previous.bbox) * 0.55 + proximity * 0.45
+      if (score > bestScore) {
+        bestScore = score
+        bestId = id
       }
     }
 
-    if (bestMatch) {
-      used.add(bestMatch.id)
-      result.push({ ...det, id: bestMatch.id })
-    } else {
-      result.push({ ...det, id: nextId++ })
-    }
+    const id = bestId ?? nextId++
+    if (bestId !== null) used.add(bestId)
+    matched.add(id)
+    const trackedDetection = { ...detection, id }
+    activeTracks.set(id, { detection: trackedDetection, missedFrames: 0 })
+    result.push(trackedDetection)
+  }
+
+  for (const [id, track] of activeTracks) {
+    if (matched.has(id)) continue
+    track.missedFrames += 1
+    if (track.missedFrames > 2) activeTracks.delete(id)
   }
 
   return result
@@ -272,10 +302,7 @@ export async function detectObjects(
   detections = applyNMS(detections, config.iouThreshold)
 
   // Assign stable IDs via temporal tracking
-  detections = assignIds(detections, previousDetections)
-
-  // Store for next frame
-  previousDetections = detections
+  detections = assignIds(detections)
 
   return detections
 }
@@ -303,7 +330,7 @@ export function cleanup(): void {
   model?.dispose()
   model = null
   modelLoadPromise = null
-  previousDetections = []
+  activeTracks.clear()
   nextId = 1
   _resizeCanvas = null
   _frameCount = 0
