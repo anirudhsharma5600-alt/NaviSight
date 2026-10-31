@@ -42,7 +42,9 @@ The included sketch is an example for a VL53L0X sensor; other ToF modules need t
 2. Open the AI Vision page and press **Connect ToF sensor**.
 3. Choose the ESP32 sensor in the browser's Bluetooth picker.
 4. Confirm that a centimetre reading appears in the Distance sensor panel.
-5. Press **Describe Area** to hear the current scene and sensor reading.
+5. With a valid live reading, Navi can speak when the sensor enters a closer range or its measured trend changes to approaching or receding. Press **Describe Area** to hear the current scene and latest sensor reading together.
+
+The spoken hardware alert describes only something in the ToF beam. It does not attach that measurement to a camera-detected object or identify the object by itself.
 
 The browser must support Web Bluetooth. If the browser does not expose Bluetooth, the app will still use the camera's approximate near/far estimate.
 

@@ -73,6 +73,11 @@ export default function Dashboard() {
   const [sensorConnected, setSensorConnected] = useState(isBLESensorConnected())
   const [sensorDistance, setSensorDistance] = useState<number | null>(getSensorDistance())
   const [sensorRangeTrend, setSensorRangeTrend] = useState(getSensorRangeTrend())
+  const sensorAlertStateRef = useRef<{
+    band: 'unknown' | 'far' | 'nearby' | 'close' | 'critical'
+    trend: ReturnType<typeof getSensorRangeTrend>
+    lastAnnouncedAt: number
+  }>({ band: 'unknown', trend: 'UNKNOWN', lastAnnouncedAt: 0 })
   const [sensorConnecting, setSensorConnecting] = useState(false)
   const [audioMode, setAudioMode] = useState<AudioOperatingMode>(VoiceManager.getMode())
   const [fps, setFps] = useState(0)
@@ -513,12 +518,58 @@ export default function Dashboard() {
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setSensorConnected(isBLESensorConnected())
-      setSensorDistance(getSensorDistance())
-      setSensorRangeTrend(getSensorRangeTrend())
+      const connected = isBLESensorConnected()
+      const distance = getSensorDistance()
+      const trend = getSensorRangeTrend()
+      setSensorConnected(connected)
+      setSensorDistance(distance)
+      setSensorRangeTrend(trend)
+
+      if (!connected || distance === null) {
+        sensorAlertStateRef.current.band = 'unknown'
+        sensorAlertStateRef.current.trend = 'UNKNOWN'
+        sensorAlertStateRef.current.lastAnnouncedAt = 0
+        return
+      }
+
+      const band = distance <= 50 ? 'critical' : distance <= 120 ? 'close' : distance <= 250 ? 'nearby' : 'far'
+      const riskRank = { unknown: 0, far: 0, nearby: 1, close: 2, critical: 3 } as const
+      const previous = sensorAlertStateRef.current
+      const enteredCloserBand = riskRank[band] > riskRank[previous.band]
+      const approachStarted = trend === 'APPROACHING' && previous.trend !== 'APPROACHING' && band !== 'far'
+      const recessionStarted = trend === 'RECEDING' && previous.trend !== 'RECEDING' && band !== 'far'
+      const isUrgent = band === 'critical'
+      const cooldownElapsed = Date.now() - previous.lastAnnouncedAt >= 6500
+
+      if (
+        (enteredCloserBand || approachStarted || recessionStarted) &&
+        (cooldownElapsed || (isUrgent && enteredCloserBand))
+      ) {
+        const distanceText = speechLanguage === 'hi'
+          ? `${Math.round(distance)} सेंटीमीटर`
+          : `${Math.round(distance)} centimetres`
+        const trendText = trend === 'APPROACHING'
+          ? speechLanguage === 'hi' ? 'दूरी घट रही है।' : 'The reading is decreasing.'
+          : trend === 'RECEDING'
+            ? speechLanguage === 'hi' ? 'दूरी बढ़ रही है।' : 'The reading is increasing.'
+            : ''
+        const message = speechLanguage === 'hi'
+          ? `दूरी सेंसर की किरण के सामने कुछ लगभग ${distanceText} दूर है। ${trendText ? `${trendText} ` : ''}सेंसर वस्तु का नाम नहीं पहचानता।`
+          : `The distance sensor detects something about ${distanceText} away in its beam. ${trendText ? `${trendText} ` : ''}It does not identify the object.`
+        const spoken = VoiceManager.announce(message, isUrgent ? 'HIGH' : 'MEDIUM', {
+          lang: speechLanguage,
+          cooldownMs: 6500,
+          domain: 'proximity',
+          force: isUrgent,
+        })
+        if (spoken) previous.lastAnnouncedAt = Date.now()
+      }
+
+      previous.band = band
+      previous.trend = trend
     }, 400)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [speechLanguage])
 
   // ─── A. CAMERA INITIALIZATION & B. VIDEO RENDERING ───
   const startCamera = useCallback(async (targetDeviceId?: string) => {
