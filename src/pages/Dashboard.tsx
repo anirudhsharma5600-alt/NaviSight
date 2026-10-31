@@ -23,6 +23,7 @@ import {
 } from '../services/proximityEngine'
 import { VoiceManager, type AudioOperatingMode } from '../services/VoiceAnnouncementManager'
 import { PersonTracker } from '../services/PersonAnnouncementTracker'
+import { RoadIntelligence } from '../services/roadIntelligence'
 import {
   recognizeBanknote, loadCurrencyModel, type CurrencyRecognitionResult,
 } from '../services/currencyDetection'
@@ -80,12 +81,12 @@ export default function Dashboard() {
     apiAvailable: typeof navigator !== 'undefined' && !!navigator.mediaDevices && !!navigator.mediaDevices.getUserMedia,
   })
 
-  // Auto-read Indian Currency state in Vision tab (Requirement 1)
+  // Auto-read Indian Currency state in Vision tab (Defaults to ON for instant recognition)
   const [autoReadCurrency, setAutoReadCurrency] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('naviable_auto_currency') === 'true'
+      return localStorage.getItem('naviable_auto_currency') !== 'false'
     }
-    return false
+    return true
   })
   const [isVisionCurrencyScanning, setIsVisionCurrencyScanning] = useState(false)
   const [visionCurrencyToast, setVisionCurrencyToast] = useState<{
@@ -238,6 +239,11 @@ export default function Dashboard() {
         // Intelligent Person Event Tracking (Prevents repetitive shouts)
         if (results.length > 0) {
           PersonTracker.processFrame(results, video.videoWidth, video.videoHeight, {
+            generalNarrationEnabled: audioEnabled,
+          })
+
+          // Intelligent Road Object & Vehicle Intelligence (Cars, Bikes, Signs, Benches, Obstacles)
+          RoadIntelligence.processFrame(results, video.videoWidth, video.videoHeight, {
             generalNarrationEnabled: audioEnabled,
           })
         }

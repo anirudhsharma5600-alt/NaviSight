@@ -63,7 +63,15 @@ export default function CurrencyPage() {
     queryCameraPermission().then(() => setTelemetry(getCameraTelemetry()))
     enumerateVideoCameras().then(() => setTelemetry(getCameraTelemetry()))
 
+    // Auto-start camera if element is ready
+    const timer = setTimeout(() => {
+      if (videoRef.current && !cameraActive) {
+        handleStartCamera()
+      }
+    }, 300)
+
     return () => {
+      clearTimeout(timer)
       // Revert to general assistance when leaving currency page
       VoiceManager.setMode('general_assistance')
       unsubscribeVoice()

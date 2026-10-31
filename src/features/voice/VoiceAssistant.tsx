@@ -1,635 +1,391 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Mic, MicOff, Volume2, Square, HelpCircle, Loader2, Eye, Camera, BookOpen } from 'lucide-react'
-import { speak, stopSpeaking, repeatLast, getLastSpokenText } from '../../services/speechService'
-import { generateSceneDescription } from '../../services/contextEngine'
-import { getLatestDetections, naviEmit } from '../../services/naviEventBus'
-import { getFullStatus } from '../../services/modelManager'
-
-type Status = 'idle' | 'listening' | 'processing' | 'speaking' | 'error'
-
-// Check browser support
-const SpeechRecognitionAPI =
-  (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-
-// ─── Intent Matching ───
-
-interface Intent {
-  name: string
-  patterns: RegExp[]
-  handler: () => string
-}
-
-function createIntents(navigate: (path: string) => void): Intent[] {
-  return [
-    {
-      name: 'greet',
-      patterns: [/\b(hello|hi|hey)\b/i, /\b(namaste|नमस्ते|हेलो|हाय)\b/i],
-      handler: () =>
-        "Hello! I'm Navi, your AI accessibility assistant. I can describe your surroundings, read text, and help you navigate. Say 'help' to learn more!",
-    },
-    {
-      name: 'help',
-      patterns: [/\b(help|commands?|what can you|what do you)\b/i, /\b(मदद|सहायता|क्या कर सकत)\b/i],
-      handler: () =>
-        "Here's what I can do: Say 'describe surroundings' to know what's around you. " +
-        "Say 'what objects' to list detected objects. " +
-        "Say 'start camera' or 'stop camera' to control the camera. " +
-        "Say 'read text' to go to the OCR reader. " +
-        "Say 'navigate' for directions. " +
-        "Say 'proximity alerts' for obstacle warnings. " +
-        "Say 'read currency' to identify banknotes. " +
-        "Say 'detect potholes' for road hazard alerts. " +
-        "Say 'status' to check AI system status. " +
-        "Say 'stop' to silence me. Say 'repeat' to hear my last response. " +
-        "Hindi commands also work: 'kya hai aas paas', 'camera chalu karo', 'rasta dikhao'.",
-    },
-    {
-      name: 'describe_surroundings',
-      patterns: [
-        /\b(describe|surroundings?|what.*see|what.*around|what.*front|scene|environment)\b/i,
-        /\b(kya hai|aas paas|samne kya|आस पास|सामने क्या|बताओ)\b/i,
-      ],
-      handler: () => {
-        const detections = getLatestDetections()
-        if (detections.length === 0) {
-          return "I don't see any objects right now. Make sure the camera is active on the AI Vision Dashboard. Say 'start camera' to turn it on."
-        }
-        const scene = generateSceneDescription(detections)
-        return scene.text
-      },
-    },
-    {
-      name: 'what_objects',
-      patterns: [/\b(what objects|list.*objects|nearby|what.*detect|objects.*near)\b/i],
-      handler: () => {
-        const detections = getLatestDetections()
-        if (detections.length === 0) {
-          return "No objects detected right now. Make sure the camera is active."
-        }
-        const items = detections.map(
-          (d) =>
-            `${d.class} (${Math.round(d.score * 100)}% confidence, ${d.position.toLowerCase()})`
-        )
-        return `I can see ${detections.length} object${detections.length > 1 ? 's' : ''}: ${items.join(', ')}.`
-      },
-    },
-    {
-      name: 'find_object',
-      patterns: [/\b(find|where.*is|look.*for|locate)\s+(?:a\s+|the\s+)?(\w+)/i],
-      handler: () => {
-        // We'll extract the object name in processCommand
-        return '' // Handled specially below
-      },
-    },
-    {
-      name: 'start_camera',
-      patterns: [/\b(start|open|turn on|enable).*camera\b/i, /\b(camera chalu|कैमरा चालू|कैमरा खोलो)\b/i],
-      handler: () => {
-        naviEmit('camera:start')
-        return "Starting the camera now. I'll begin detecting objects once the AI model is ready."
-      },
-    },
-    {
-      name: 'stop_camera',
-      patterns: [/\b(stop|close|turn off|disable).*camera\b/i, /\b(camera band|कैमरा बंद)\b/i],
-      handler: () => {
-        naviEmit('camera:stop')
-        return 'Camera stopped. Say "start camera" to turn it back on.'
-      },
-    },
-    {
-      name: 'read_text',
-      patterns: [/\b(read|text|sign|ocr|scan|label)\b/i, /\b(padho|पढ़ो|text padho)\b/i],
-      handler: () => {
-        navigate('/ocr')
-        return "Opening the Smart OCR Reader. You can capture text from signs, labels, and documents there."
-      },
-    },
-    {
-      name: 'proximity_alerts',
-      patterns: [/\b(proximity|distance|how close|beep|alarm)\b/i, /\b(kitni dur|कितनी दूर|नज़दीक|kareeb)\b/i],
-      handler: () => {
-        navigate('/proximity')
-        return "Opening Proximity Alerts. You will hear dynamic audio beeps and vibration warnings as objects approach."
-      },
-    },
-    {
-      name: 'currency_reader',
-      patterns: [/\b(currency|rupee|note|money|cash|banknote)\b/i, /\b(paisa|पैसा|नोट|रुपया|kitne ka)\b/i],
-      handler: () => {
-        navigate('/currency')
-        return "Opening Indian Currency Reader. Point your camera at a banknote to inspect its denomination."
-      },
-    },
-    {
-      name: 'pothole_detection',
-      patterns: [/\b(pothole|potholes|road hazard|crack|road damage)\b/i, /\b(gadda|गड्ढा|sadak|सड़क)\b/i],
-      handler: () => {
-        navigate('/pothole')
-        return "Opening Road Hazard Detection. You can monitor the road ahead for potholes, cracks, and obstacles."
-      },
-    },
-    {
-      name: 'navigate',
-      patterns: [/\b(navigate|direction|where|map|location|gps)\b/i, /\b(rasta|रास्ता|kidhar|किधर|नक्शा|naksha)\b/i],
-      handler: () => {
-        navigate('/navigation')
-        return "Opening the Navigation page. You can see your location and search for destinations there."
-      },
-    },
-    {
-      name: 'go_dashboard',
-      patterns: [/\b(dashboard|vision|detection|camera.*page)\b/i],
-      handler: () => {
-        navigate('/dashboard')
-        return 'Opening the AI Vision Dashboard.'
-      },
-    },
-    {
-      name: 'status',
-      patterns: [/\b(status|system|health|check)\b/i],
-      handler: () => {
-        const s = getFullStatus()
-        const lines: string[] = []
-        lines.push(`Object detection: ${s.objectDetection}.`)
-        lines.push(`Camera: ${s.camera}.`)
-        lines.push(`Voice recognition: ${s.voiceRecognition}.`)
-        lines.push(`Text to speech: ${s.textToSpeech}.`)
-        lines.push(`OCR engine: ${s.ocrEngine}.`)
-        return `AI System Status. ${lines.join(' ')}`
-      },
-    },
-    {
-      name: 'stop',
-      patterns: [/\b(stop|quiet|silence|shut|hush|mute)\b/i, /\b(chup|बंद करो|रुको|bas)\b/i],
-      handler: () => {
-        stopSpeaking()
-        return "Okay, I'll be quiet now."
-      },
-    },
-    {
-      name: 'repeat',
-      patterns: [/\b(repeat|again|say.*again|what.*say)\b/i],
-      handler: () => {
-        const last = getLastSpokenText()
-        if (last) {
-          repeatLast()
-          return last
-        }
-        return "I haven't said anything yet."
-      },
-    },
-    {
-      name: 'thanks',
-      patterns: [/\b(thank|thanks|thank you)\b/i, /\b(shukriya|शुक्रिया|dhanyawad|धन्यवाद)\b/i],
-      handler: () => "You're welcome! I'm always here to help.",
-    },
-    {
-      name: 'identity',
-      patterns: [/\b(who.*you|your.*name|introduce)\b/i],
-      handler: () =>
-        "I'm Navi, your AI-powered accessibility assistant built by NaviAble AI. I help visually impaired people understand their surroundings using computer vision, voice interaction, and smart navigation.",
-    },
-  ]
-}
+import {
+  Mic, MicOff, Volume2, Square, HelpCircle, Loader2, Eye, Camera,
+  BookOpen, Sparkles, AlertTriangle, ShieldCheck, RefreshCw, VolumeX, Globe
+} from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { NaviAssistant } from '../../assistant/NaviAssistant'
+import { AssistantState, type AssistantStateData, type AssistantLanguage } from '../../assistant/AssistantState'
+import { VoiceManager } from '../../services/VoiceAnnouncementManager'
 
 export default function VoiceAssistant() {
-  const [status, setStatus] = useState<Status>('idle')
-  const [transcript, setTranscript] = useState('')
-  const [response, setResponse] = useState('')
-  const [error, setError] = useState('')
-  const [history, setHistory] = useState<Array<{ user: string; navi: string; time: string }>>([])
-  const recognitionRef = useRef<any>(null)
-  const [detectionCount, setDetectionCount] = useState(0)
-  const [voiceLang, setVoiceLang] = useState<'en-US' | 'hi-IN'>('en-US')
+  const [state, setState] = useState<AssistantStateData>(AssistantState.getState())
+  const [manualInput, setManualInput] = useState('')
+  const navigate = useNavigate()
 
-  // Poll detection count for display
   useEffect(() => {
-    const interval = setInterval(() => {
-      setDetectionCount(getLatestDetections().length)
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [])
+    NaviAssistant.init(navigate)
+    const unsubscribe = AssistantState.subscribe(setState)
+    return () => unsubscribe()
+  }, [navigate])
 
-  // Simple navigate function (uses window.location for lazy-loaded routes)
-  const navigateTo = useCallback((path: string) => {
-    // Use pushState + dispatch to trigger React Router
-    window.history.pushState({}, '', path)
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }, [])
-
-  const intents = useRef(createIntents(navigateTo)).current
-
-  const processCommand = useCallback(
-    (text: string): string => {
-      const lower = text.toLowerCase().trim()
-
-      // Special: "find <object>" pattern
-      const findMatch = lower.match(
-        /\b(?:find|where.*is|look.*for|locate)\s+(?:a\s+|the\s+)?(\w+)/i
-      )
-      if (findMatch) {
-        const target = findMatch[1]
-        const detections = getLatestDetections()
-        const found = detections.filter(
-          (d) => d.class.toLowerCase().includes(target)
-        )
-        if (found.length > 0) {
-          const positions = found.map(
-            (d) => `${d.position.toLowerCase()} (${Math.round(d.score * 100)}%)`
-          )
-          return `I found ${found.length} ${target}${found.length > 1 ? 's' : ''}: ${positions.join(', ')}.`
-        }
-        return `I don't see any ${target} right now. Make sure the camera is active and pointing at the area.`
-      }
-
-      // Try each intent
-      for (const intent of intents) {
-        if (intent.name === 'find_object') continue // handled above
-        for (const pattern of intent.patterns) {
-          if (pattern.test(lower)) {
-            return intent.handler()
-          }
-        }
-      }
-
-      return `I heard: "${text}". I'm not sure what you need. Say 'help' to learn what I can do!`
-    },
-    [intents]
-  )
-
-  const speakResponse = useCallback((text: string) => {
-    setStatus('speaking')
-    speak(text, voiceLang)
-    // Listen for speech end to reset status
-    const checkInterval = setInterval(() => {
-      if (!window.speechSynthesis?.speaking) {
-        setStatus('idle')
-        clearInterval(checkInterval)
-      }
-    }, 200)
-  }, [voiceLang])
-
-  const startListening = useCallback(() => {
-    if (!SpeechRecognitionAPI) {
-      setError(
-        'Speech recognition is not supported in this browser. Please use Chrome or Edge.'
-      )
-      setStatus('error')
-      return
+  const handleToggleEnable = async () => {
+    if (state.isEnabled) {
+      NaviAssistant.disableAssistant()
+    } else {
+      await NaviAssistant.enableAssistant()
     }
-
-    setError('')
-    setTranscript('')
-
-    const recognition = new SpeechRecognitionAPI()
-    recognition.continuous = false
-    recognition.interimResults = true
-    recognition.lang = voiceLang
-
-    recognition.onstart = () => setStatus('listening')
-
-    recognition.onresult = (event: any) => {
-      const result = event.results[event.results.length - 1]
-      setTranscript(result[0].transcript)
-
-      if (result.isFinal) {
-        setStatus('processing')
-        const text = result[0].transcript
-        const reply = processCommand(text)
-        setResponse(reply)
-
-        const now = new Date()
-        const timeStr = now.toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-        setHistory((prev) => [
-          ...prev.slice(-9),
-          { user: text, navi: reply, time: timeStr },
-        ])
-
-        setTimeout(() => speakResponse(reply), 300)
-      }
-    }
-
-    recognition.onerror = (event: any) => {
-      if (event.error === 'no-speech') {
-        setError('No speech detected. Please try again.')
-      } else if (event.error === 'not-allowed') {
-        setError(
-          'Microphone permission denied. Please allow microphone access.'
-        )
-      } else {
-        setError(`Speech recognition error: ${event.error}`)
-      }
-      setStatus('error')
-    }
-
-    recognition.onend = () => {
-      if (status === 'listening') setStatus('idle')
-    }
-
-    recognitionRef.current = recognition
-    recognition.start()
-  }, [processCommand, speakResponse, status, voiceLang])
-
-  const stopEverything = () => {
-    recognitionRef.current?.stop()
-    stopSpeaking()
-    setStatus('idle')
   }
 
-  const statusColors = {
-    idle: 'from-cyan-400/20 to-neon-blue/20 border-cyan-400/30',
-    listening: 'from-green-400/20 to-emerald-500/20 border-green-400/50',
-    processing: 'from-yellow-400/20 to-amber-500/20 border-yellow-400/40',
-    speaking: 'from-neon-purple/20 to-violet-500/20 border-neon-purple/50',
-    error: 'from-red-400/20 to-red-500/20 border-red-400/40',
+  const handleMicClick = () => {
+    NaviAssistant.tapToTalk()
   }
 
-  const statusText = {
-    idle: 'Tap to talk to Navi',
-    listening: 'Navi is listening...',
-    processing: 'Processing...',
-    speaking: 'Navi is speaking...',
-    error: 'Something went wrong',
+  const handleLanguageSelect = (lang: AssistantLanguage) => {
+    AssistantState.updateState({ language: lang })
+    VoiceManager.setLanguage(lang)
+  }
+
+  const handleStopAll = () => {
+    NaviAssistant.stopSpeaking()
+  }
+
+  const handleQuickCommand = async (cmd: string) => {
+    await NaviAssistant.handleTranscriptReceived(cmd, true)
+  }
+
+  const handleManualSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!manualInput.trim()) return
+    const text = manualInput
+    setManualInput('')
+    await NaviAssistant.handleTranscriptReceived(text, true)
   }
 
   return (
-    <div className="min-h-screen pt-20 pb-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen pt-20 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
+        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-10"
+          className="text-center mb-8"
         >
-          <h1 className="font-display text-3xl md:text-4xl font-bold mb-2">
-            Navi <span className="gradient-text">Voice Assistant</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-400/20 text-cyan-300 text-xs font-mono uppercase tracking-wider mb-3">
+            <Sparkles className="w-3.5 h-3.5" /> Alexa-Style Conversational AI
+          </div>
+          <h1 className="font-display text-4xl sm:text-5xl font-bold mb-3">
+            Hey <span className="gradient-text">Navi</span>
           </h1>
-          <p className="text-gray-400">
-            Your intelligent AI companion — just talk!
+          <p className="text-gray-400 text-sm sm:text-base max-w-xl mx-auto">
+            Hands-free voice companion for visually impaired users. Say <span className="text-cyan-300 font-semibold font-mono">"Hey Navi"</span> or tap the microphone to control your camera, read currency, and check road conditions.
           </p>
         </motion.div>
 
-        {/* Language Selection & Live Detection Indicator */}
-        <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
-          <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-full p-1 text-xs">
-            <button
-              onClick={() => setVoiceLang('en-US')}
-              className={`px-3 py-1 rounded-full font-medium transition-all ${
-                voiceLang === 'en-US'
-                  ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-400/30'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              English (US)
-            </button>
-            <button
-              onClick={() => setVoiceLang('hi-IN')}
-              className={`px-3 py-1 rounded-full font-medium transition-all ${
-                voiceLang === 'hi-IN'
-                  ? 'bg-purple-500/20 text-purple-400 border border-purple-400/30'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              हिन्दी (Hindi)
-            </button>
-          </div>
+        {/* Master Control Card */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="glass-card p-6 sm:p-8 mb-8 border border-cyan-500/25 bg-gradient-to-b from-cyan-950/20 to-black/40 shadow-2xl relative overflow-hidden"
+        >
+          {/* Top Status & Language Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-white/10">
+            {/* Master Toggle */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleToggleEnable}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full font-semibold text-xs tracking-wide transition-all ${
+                  state.isEnabled
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 shadow-sm shadow-emerald-500/20'
+                    : 'bg-white/5 text-gray-400 border border-white/10 hover:text-white'
+                }`}
+              >
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    state.isEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'
+                  }`}
+                />
+                {state.isEnabled ? 'Navi Always-Listening: ON' : 'Enable Navi (Wake-Word)'}
+              </button>
 
-          <div className="glass-card px-4 py-2 flex items-center gap-3 text-xs">
-            <div className="flex items-center gap-1.5">
-              <Eye className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="text-gray-400">
-                Live Objects:{' '}
-                <span className={detectionCount > 0 ? 'text-cyan-400' : 'text-gray-600'}>
-                  {detectionCount}
-                </span>
+              <span className="text-xs text-gray-400 font-mono hidden sm:inline">
+                Say: "Hey Navi"
               </span>
             </div>
-            <span className="text-gray-700">|</span>
-            <span className="text-gray-500">
-              Say{' '}
-              <span className="text-cyan-400">"describe surroundings"</span> or{' '}
-              <span className="text-purple-400">"आस पास क्या है"</span>
-            </span>
-          </div>
-        </div>
 
-        {/* Main Mic Button */}
-        <motion.div
-          initial={{ opacity: 0, scale: 0.8 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.2 }}
-          className="flex flex-col items-center mb-12"
-        >
-          <button
-            onClick={
-              status === 'idle' || status === 'error'
-                ? startListening
-                : stopEverything
-            }
-            className={`relative w-32 h-32 rounded-full bg-gradient-to-br ${statusColors[status]} border-2 transition-all duration-500 group hover:scale-105 focus:outline-none focus:ring-4 focus:ring-cyan-400/30`}
-            aria-label={status === 'idle' ? 'Start listening' : 'Stop'}
-          >
-            {/* Pulse rings */}
-            {status === 'listening' && (
-              <>
-                <span className="absolute inset-0 rounded-full border-2 border-green-400/40 animate-ping" />
-                <span className="absolute -inset-3 rounded-full border border-green-400/20 animate-pulse" />
-              </>
-            )}
-            {status === 'speaking' && (
-              <span className="absolute -inset-2 rounded-full border border-neon-purple/30 animate-pulse" />
-            )}
-
-            <div className="relative z-10 flex items-center justify-center h-full">
-              {status === 'listening' ? (
-                <Mic className="w-12 h-12 text-green-400 animate-pulse" />
-              ) : status === 'processing' ? (
-                <Loader2 className="w-12 h-12 text-yellow-400 animate-spin" />
-              ) : status === 'speaking' ? (
-                <Volume2 className="w-12 h-12 text-neon-purple animate-pulse" />
-              ) : (
-                <Mic className="w-12 h-12 text-cyan-400 group-hover:text-white transition-colors" />
-              )}
-            </div>
-          </button>
-
-          <p
-            className={`mt-4 text-sm font-medium ${status === 'error' ? 'text-red-400' : 'text-gray-400'}`}
-          >
-            {statusText[status]}
-          </p>
-
-          {/* Waveform animation */}
-          {(status === 'listening' || status === 'speaking') && (
-            <div className="flex items-end gap-1 mt-4 h-8">
-              {[...Array(7)].map((_, i) => (
-                <motion.div
-                  key={i}
-                  className={`w-1 rounded-full ${status === 'listening' ? 'bg-green-400' : 'bg-neon-purple'}`}
-                  animate={{ height: [8, 20 + Math.random() * 16, 8] }}
-                  transition={{
-                    duration: 0.5 + Math.random() * 0.3,
-                    repeat: Infinity,
-                    delay: i * 0.08,
-                  }}
-                />
+            {/* Language Selector */}
+            <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 rounded-full p-1 text-xs">
+              <Globe className="w-3.5 h-3.5 text-gray-400 ml-1.5" />
+              {(['en', 'hi', 'pa'] as const).map((lang) => (
+                <button
+                  key={lang}
+                  onClick={() => handleLanguageSelect(lang)}
+                  className={`px-3 py-1 rounded-full font-medium transition-all ${
+                    state.language === lang
+                      ? 'bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/20'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {lang === 'en' ? 'English' : lang === 'hi' ? 'हिन्दी' : 'ਪੰਜਾਬੀ'}
+                </button>
               ))}
             </div>
-          )}
+          </div>
 
-          {/* Stop button when speaking */}
-          {status === 'speaking' && (
+          {/* Central Interactive Voice Orb */}
+          <div className="flex flex-col items-center justify-center py-6 text-center">
+            <div className="relative mb-6">
+              {/* Outer Pulse Rings */}
+              {state.wakeWordActive && (
+                <motion.div
+                  animate={{ scale: [1, 1.4, 1], opacity: [0.6, 0.1, 0.6] }}
+                  transition={{ duration: 1.5, repeat: Infinity }}
+                  className="absolute inset-0 rounded-full bg-purple-500/30 blur-md -m-4"
+                />
+              )}
+              {state.isListening && !state.wakeWordActive && (
+                <motion.div
+                  animate={{ scale: [1, 1.25, 1], opacity: [0.5, 0.1, 0.5] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className="absolute inset-0 rounded-full bg-cyan-500/25 blur-md -m-3"
+                />
+              )}
+
+              {/* Large Push-to-Talk Mic Button */}
+              <button
+                onClick={handleMicClick}
+                aria-label="Activate voice listening"
+                className={`w-28 h-28 sm:w-32 sm:h-32 rounded-full flex items-center justify-center transition-all shadow-2xl active:scale-95 ${
+                  state.wakeWordActive
+                    ? 'bg-gradient-to-tr from-purple-600 to-pink-500 text-white shadow-purple-500/50 scale-105'
+                    : state.status === 'processing'
+                    ? 'bg-gradient-to-tr from-amber-500 to-orange-500 text-white shadow-amber-500/30'
+                    : state.status === 'speaking'
+                    ? 'bg-gradient-to-tr from-blue-600 to-cyan-400 text-white shadow-cyan-500/30'
+                    : state.isListening
+                    ? 'bg-gradient-to-tr from-cyan-400 to-blue-600 text-black shadow-cyan-500/40'
+                    : 'bg-white/10 text-gray-300 border-2 border-white/20 hover:bg-white/15'
+                }`}
+              >
+                {state.status === 'processing' ? (
+                  <Loader2 className="w-12 h-12 animate-spin text-white" />
+                ) : state.status === 'speaking' ? (
+                  <Volume2 className="w-12 h-12 animate-pulse text-white" />
+                ) : (
+                  <Mic className="w-12 h-12" />
+                )}
+              </button>
+            </div>
+
+            {/* Status Feedback Heading */}
+            <h2 className="text-xl font-bold font-display text-white mb-1">
+              {state.wakeWordActive
+                ? 'Yes, how can I help?'
+                : state.status === 'processing'
+                ? 'Processing command...'
+                : state.status === 'speaking'
+                ? 'Speaking response...'
+                : state.isListening
+                ? "Listening for 'Hey Navi'..."
+                : 'Tap to speak or enable wake-word'}
+            </h2>
+            <p className="text-gray-400 text-xs sm:text-sm max-w-md">
+              {state.wakeWordActive
+                ? 'Speak your request clearly (e.g. "Check how much money this is")'
+                : state.isListening
+                ? 'Say "Hey Navi" at any time, or click the microphone to speak immediately.'
+                : 'Microphone is standby. Tap the button or enable always-listening.'}
+            </p>
+          </div>
+
+          {/* Action Bar (Stop Audio, Silence, Repeat) */}
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-4 border-t border-white/10">
             <button
-              onClick={stopEverything}
-              className="mt-4 flex items-center gap-2 px-5 py-2 rounded-full bg-red-500/20 text-red-400 border border-red-400/30 hover:bg-red-500/30 text-sm"
+              onClick={handleStopAll}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-all"
             >
-              <Square className="w-4 h-4" /> Stop Speaking
+              <Square className="w-3.5 h-3.5" /> Stop Speaking
             </button>
-          )}
+            <button
+              onClick={() => handleQuickCommand('repeat')}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold bg-white/5 text-gray-300 border border-white/10 hover:bg-white/10 transition-all"
+            >
+              <Volume2 className="w-3.5 h-3.5" /> Repeat Last Response
+            </button>
+          </div>
         </motion.div>
 
-        {/* Transcript & Response */}
-        <AnimatePresence>
-          {(transcript || response) && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              className="glass-card p-6 mb-8 max-w-2xl mx-auto"
-            >
-              {transcript && (
-                <div className="mb-4">
-                  <span className="text-xs text-gray-500 uppercase tracking-wider">
-                    You said:
-                  </span>
-                  <p className="text-white mt-1">"{transcript}"</p>
-                </div>
-              )}
-              {response && (
-                <div>
-                  <span className="text-xs text-cyan-400 uppercase tracking-wider">
-                    Navi says:
-                  </span>
-                  <p className="text-gray-300 mt-1">{response}</p>
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Error */}
-        {error && (
-          <div className="glass-card p-4 mb-8 max-w-2xl mx-auto bg-red-500/5 border-red-500/20">
-            <p className="text-red-400 text-sm">{error}</p>
-          </div>
-        )}
-
-        {/* Conversation History */}
-        {history.length > 0 && (
-          <div className="max-w-2xl mx-auto mb-8">
-            <h3 className="text-sm text-gray-500 uppercase tracking-wider mb-3">
-              Conversation History
+        {/* Live Conversation Stream */}
+        <div className="glass-card p-6 mb-8 border border-white/10">
+          <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/10">
+            <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-cyan-400" /> Interactive Conversation
             </h3>
-            <div className="space-y-3">
-              {history.map((h, i) => (
-                <div key={i} className="glass-card p-4 bg-white/[0.02]">
-                  <div className="flex justify-between items-start mb-1">
-                    <p className="text-sm text-gray-300">
-                      <span className="text-cyan-400">You:</span> {h.user}
-                    </p>
-                    <span className="text-xs text-gray-600 ml-2 flex-shrink-0">
-                      {h.time}
+            <span className="text-xs text-gray-500 font-mono">Real AI Interaction</span>
+          </div>
+
+          <div className="space-y-3 max-h-64 overflow-y-auto pr-1 mb-4">
+            {state.conversation.length === 0 ? (
+              <p className="text-gray-500 text-xs text-center py-4">
+                No commands yet. Say "Hey Navi, describe surroundings" to begin.
+              </p>
+            ) : (
+              state.conversation.map((msg) => (
+                <div
+                  key={msg.id}
+                  className={`p-3.5 rounded-2xl text-sm ${
+                    msg.sender === 'user'
+                      ? 'bg-cyan-500/15 border border-cyan-400/30 text-cyan-200 ml-8'
+                      : 'bg-white/5 border border-white/10 text-gray-200 mr-8'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-[11px] font-semibold text-gray-400 mb-1">
+                    <span>{msg.sender === 'user' ? '👤 You' : '🤖 Navi'}</span>
+                    <span className="font-mono text-[10px] text-gray-500">
+                      {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
-                  <p className="text-sm text-gray-400 mt-1">
-                    <span className="text-neon-purple">Navi:</span> {h.navi}
-                  </p>
+                  <p className="leading-relaxed">{msg.text}</p>
                 </div>
-              ))}
-            </div>
+              ))
+            )}
           </div>
-        )}
 
-        {/* Command Reference */}
+          {/* Text Command Fallback Input */}
+          <form onSubmit={handleManualSubmit} className="flex gap-2">
+            <input
+              type="text"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder="Or type a command (e.g. 'check how much money this is', 'describe road')..."
+              className="flex-1 bg-black/40 border border-white/10 rounded-full px-4 py-2.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-cyan-400 transition-colors"
+            />
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 hover:bg-cyan-500/30 rounded-full text-xs font-semibold transition-all"
+            >
+              Send
+            </button>
+          </form>
+        </div>
+
+        {/* Command Reference by Category */}
         <motion.div
-          initial={{ opacity: 0 }}
-          whileInView={{ opacity: 1 }}
-          viewport={{ once: true }}
-          className="max-w-2xl mx-auto"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="space-y-4"
         >
-          <h3 className="text-sm text-gray-500 uppercase tracking-wider mb-4 flex items-center gap-2">
-            <HelpCircle className="w-4 h-4" /> Available Commands
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {[
-              {
-                cmd: '"Describe my surroundings"',
-                desc: 'AI-powered scene description from live camera',
-                icon: Eye,
-              },
-              {
-                cmd: '"What objects are nearby?"',
-                desc: 'List all detected objects with positions',
-                icon: Eye,
-              },
-              {
-                cmd: '"Find a chair"',
-                desc: 'Locate a specific object in the camera view',
-                icon: Eye,
-              },
-              {
-                cmd: '"Start / Stop camera"',
-                desc: 'Control the camera remotely',
-                icon: Camera,
-              },
-              {
-                cmd: '"Read this text"',
-                desc: 'Go to OCR text recognition',
-                icon: BookOpen,
-              },
-              {
-                cmd: '"Proximity alerts"',
-                desc: 'Open proximity detection & audio beeps',
-                icon: Eye,
-              },
-              {
-                cmd: '"Read currency"',
-                desc: 'Identify Indian currency notes',
-                icon: BookOpen,
-              },
-              {
-                cmd: '"Detect potholes"',
-                desc: 'Scan road for surface hazards',
-                icon: Eye,
-              },
-              {
-                cmd: '"Help"',
-                desc: 'List all available commands',
-                icon: HelpCircle,
-              },
-              {
-                cmd: '"Status"',
-                desc: 'Check AI system health',
-                icon: HelpCircle,
-              },
-              {
-                cmd: '"Stop" / "Repeat"',
-                desc: 'Control Navi voice output',
-                icon: Volume2,
-              },
-            ].map((c) => (
-              <div key={c.cmd} className="glass-card p-3 bg-white/[0.02]">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <c.icon className="w-3.5 h-3.5 text-cyan-400/60 flex-shrink-0" />
-                  <p className="text-cyan-400 text-sm font-medium">{c.cmd}</p>
-                </div>
-                <p className="text-gray-500 text-xs ml-5.5">{c.desc}</p>
+          <div className="flex items-center gap-2 mb-2">
+            <HelpCircle className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+              Natural Voice Commands (Tap any to test)
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Category 1: Currency Commands */}
+            <div className="glass-card p-4 border border-cyan-500/20 bg-cyan-950/10">
+              <h4 className="text-xs font-bold text-cyan-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                💵 Indian Currency Commands
+              </h4>
+              <div className="space-y-1.5 text-xs">
+                <button
+                  onClick={() => handleQuickCommand('check how much money this is')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-cyan-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-cyan-400 font-mono">"Hey Navi, check how much money this is"</span>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Scans live camera frame & speaks ₹10 to ₹2000 denomination</p>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('read this note')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-cyan-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-cyan-400 font-mono">"Hey Navi, read this note"</span>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('repeat the amount')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-cyan-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-cyan-400 font-mono">"Repeat the amount"</span>
+                </button>
               </div>
-            ))}
+            </div>
+
+            {/* Category 2: Scene & Road Intelligence */}
+            <div className="glass-card p-4 border border-blue-500/20 bg-blue-950/10">
+              <h4 className="text-xs font-bold text-blue-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                👁️ Scene & Road Narration
+              </h4>
+              <div className="space-y-1.5 text-xs">
+                <button
+                  onClick={() => handleQuickCommand('describe my surroundings')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-blue-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-blue-300 font-mono">"Hey Navi, describe my surroundings"</span>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Narrates vehicles, obstacles, signs, and pedestrians</p>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('is there a vehicle nearby')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-blue-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-blue-300 font-mono">"Is there a vehicle nearby?"</span>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('tell me what is on the road')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-blue-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-blue-300 font-mono">"Tell me what's on the road"</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Category 3: Road Hazards & Potholes */}
+            <div className="glass-card p-4 border border-amber-500/20 bg-amber-950/10">
+              <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                🚧 Road Hazards & Potholes
+              </h4>
+              <div className="space-y-1.5 text-xs">
+                <button
+                  onClick={() => handleQuickCommand('detect potholes')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-amber-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-amber-300 font-mono">"Hey Navi, detect potholes"</span>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Checks surface texture & pavement cracks</p>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('describe road conditions')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-amber-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-amber-300 font-mono">"Describe road conditions"</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Category 4: Camera & System Controls */}
+            <div className="glass-card p-4 border border-purple-500/20 bg-purple-950/10">
+              <h4 className="text-xs font-bold text-purple-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                ⚙️ Camera & Assistant Controls
+              </h4>
+              <div className="space-y-1.5 text-xs">
+                <button
+                  onClick={() => handleQuickCommand('start camera')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-purple-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-purple-300 font-mono">"Hey Navi, start camera"</span>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('switch to rear camera')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-purple-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-purple-300 font-mono">"Switch to rear camera"</span>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('speak slower')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-purple-500/20 border border-white/5 transition-all text-gray-300"
+                >
+                  <span className="text-purple-300 font-mono">"Speak slower"</span>
+                </button>
+                <button
+                  onClick={() => handleQuickCommand('stop speaking')}
+                  className="w-full text-left p-2 rounded-lg bg-white/5 hover:bg-red-500/20 border border-white/5 transition-all text-red-300"
+                >
+                  <span className="text-red-400 font-mono">"Be quiet" / "Stop speaking"</span>
+                </button>
+              </div>
+            </div>
           </div>
         </motion.div>
       </div>

@@ -90,6 +90,10 @@ class VoiceAnnouncementManagerClass {
     this.rate = Math.max(0.5, Math.min(1.5, rate))
   }
 
+  public getRate(): number {
+    return this.rate
+  }
+
   public setLanguage(lang: 'en' | 'hi' | 'pa') {
     this.language = lang
     this.notifyListeners()

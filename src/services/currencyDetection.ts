@@ -415,17 +415,17 @@ function extractTensorFromRegion(
     sw = Math.max(10, Math.min(srcWidth - sx, region.width))
     sh = Math.max(10, Math.min(srcHeight - sy, region.height))
   } else {
-    // True Banknote Aspect Ratio Crop (~2.25:1)
+    // Adaptive Banknote Focus Crop (Accommodates both horizontal & vertical orientations)
     if (srcHeight > srcWidth) {
-      // Mobile Portrait Viewport
-      sw = Math.round(srcWidth * 0.90)
-      sh = Math.round(sw / 2.25)
+      // Mobile Portrait Viewport: capture comfortable central inspection zone
+      sw = Math.round(srcWidth * 0.88)
+      sh = Math.round(srcWidth * 0.68)
       sx = Math.round((srcWidth - sw) / 2)
       sy = Math.round((srcHeight - sh) / 2)
     } else {
       // Landscape Viewport
-      sw = Math.round(srcWidth * 0.72)
-      sh = Math.round(sw / 2.25)
+      sw = Math.round(srcWidth * 0.75)
+      sh = Math.round(srcHeight * 0.80)
       sx = Math.round((srcWidth - sw) / 2)
       sy = Math.round((srcHeight - sh) / 2)
     }

@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import BottomNav from './components/BottomNav'
+import NaviFloatingAssistant from './components/NaviFloatingAssistant'
 import LoadingScreen from './components/LoadingScreen'
 
 const Home = lazy(() => import('./pages/Home'))
@@ -35,6 +36,7 @@ function App() {
         </Routes>
       </Suspense>
       <Footer />
+      <NaviFloatingAssistant />
       <BottomNav />
     </div>
   )
