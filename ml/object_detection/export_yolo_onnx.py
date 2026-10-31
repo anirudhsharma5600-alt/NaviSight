@@ -27,3 +27,4 @@ def export_yolo_for_web(model_weights="yolov8n.pt", output_path="public/models/o
 if __name__ == "__main__":
     weights = sys.argv[1] if len(sys.argv) > 1 else "yolov8n.pt"
     export_yolo_for_web(weights)
+

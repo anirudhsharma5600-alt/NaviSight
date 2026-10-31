@@ -17,3 +17,4 @@
 ## Two-Stage Verification Process
 1. **Stage 1 (Physical Presence):** Edge-aspect ratio check ($\sim 2.15$), backlight/screen rejection, keyboard pattern detection.
 2. **Stage 2 (Denomination Inference):** Neural network with open-set rejection (requires confidence $\ge 0.75$, margin $\ge 0.20$, chromatic verification).
+

@@ -30,3 +30,4 @@ if __name__ == "__main__":
         optimize_onnx_model(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else sys.argv[1])
     else:
         print("Usage: python onnx_optimizer.py input.onnx [output.onnx]")
+

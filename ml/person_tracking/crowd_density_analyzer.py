@@ -43,3 +43,4 @@ def analyze_crowd_density(boxes: List[Dict[str, Any]], frame_w: int, frame_h: in
         "is_crowd": False,
         "recommended_narration": None
     }
+

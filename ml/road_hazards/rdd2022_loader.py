@@ -77,3 +77,4 @@ def convert_rdd_to_yolo(rdd_root: str, output_dir: str):
     os.makedirs(os.path.join(output_dir, "images", "val"), exist_ok=True)
     os.makedirs(os.path.join(output_dir, "labels", "val"), exist_ok=True)
     print("[RDD Loader] Conversion directory structure ready.")
+

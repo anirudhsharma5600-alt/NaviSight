@@ -5,3 +5,4 @@ Run:
 ```bash
 python onnx_optimizer.py model.onnx model_opt.onnx
 ```
+

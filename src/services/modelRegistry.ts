@@ -145,3 +145,4 @@ class ModelRegistryClass {
 }
 
 export const ModelRegistry = new ModelRegistryClass()
+

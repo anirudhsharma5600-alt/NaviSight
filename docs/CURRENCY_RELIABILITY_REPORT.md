@@ -54,3 +54,4 @@ In previous builds, pointing the camera at a laptop screen or keyboard caused Na
 
 > [!IMPORTANT]
 > NaviAble AI is an assistive optical denomination reader designed to aid visually impaired individuals in identifying banknote face values. **It does not certify legal currency authenticity or detect counterfeit notes.** Physical security features (intaglio print, latent images, micro-lettering, security threads) must be verified independently for financial transactions.
+

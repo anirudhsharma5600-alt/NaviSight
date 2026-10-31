@@ -74,3 +74,4 @@ def realistic_assistive_augmentation(img: Image.Image) -> Image.Image:
     img = apply_motion_blur(img)
     img = apply_sensor_noise(img)
     return img
+

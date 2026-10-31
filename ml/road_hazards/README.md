@@ -23,3 +23,4 @@ This module trains the lightweight **YOLOv8n** model on the **Road Damage Datase
 
 ## Safety & Disclaimer
 Road hazard detection is strictly assistive. NaviAble never guarantees that a walkway is 100% free of obstructions or defects.
+

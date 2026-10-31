@@ -64,3 +64,4 @@ def compute_detection_iou(box1: List[float], box2: List[float]) -> float:
     area2 = box2[2] * box2[3]
     union = area1 + area2 - intersection
     return intersection / union if union > 0 else 0.0
+

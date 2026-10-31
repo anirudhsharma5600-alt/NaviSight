@@ -72,3 +72,4 @@ def export_onnx(model, output_path="public/models/currency/model.onnx"):
 if __name__ == "__main__":
     model = build_model(pretrained=True)
     export_onnx(model)
+

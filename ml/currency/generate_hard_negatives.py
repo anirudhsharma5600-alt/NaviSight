@@ -52,3 +52,4 @@ def generate_hard_negative_sample(width=224, height=224) -> Image.Image:
 
 if __name__ == "__main__":
     print("[INFO] Hard negative generator initialized.")
+
