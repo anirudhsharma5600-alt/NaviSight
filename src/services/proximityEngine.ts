@@ -263,7 +263,8 @@ function evaluatePersonState(
 export function processDetectionsForProximity(
   detections: Detection[],
   frameWidth: number,
-  frameHeight: number
+  frameHeight: number,
+  options?: { suppressRoutinePersonVoice?: boolean },
 ): ProximityAlert[] {
   const frameArea = frameWidth * frameHeight
   if (frameArea === 0) {
@@ -279,7 +280,12 @@ export function processDetectionsForProximity(
   const persons = detections.filter(d => d.class.toLowerCase() === 'person' && d.score >= 0.46)
   const isCrowdPresent = persons.length >= 4
 
-  if (isCrowdPresent && config.voiceEnabled && now - lastCrowdAnnouncementTime >= CROWD_COOLDOWN_MS) {
+  if (
+    isCrowdPresent &&
+    !options?.suppressRoutinePersonVoice &&
+    config.voiceEnabled &&
+    now - lastCrowdAnnouncementTime >= CROWD_COOLDOWN_MS
+  ) {
     lastCrowdAnnouncementTime = now
     const crowdMessage = config.language === 'hi'
       ? 'आसपास लोगों का एक समूह है।'
@@ -404,11 +410,14 @@ export function processDetectionsForProximity(
   // Prioritize close targets, then announce one new transition at a time.
   // Unspoken targets remain eligible on the next frame instead of being lost
   // behind a person alert or the global speech cooldown.
-  newlyActionableAlerts.sort((a, b) =>
+  const voiceEligibleAlerts = options?.suppressRoutinePersonVoice
+    ? newlyActionableAlerts.filter(({ alert }) => !alert.isPerson || alert.zone === 'NEAR')
+    : newlyActionableAlerts
+  voiceEligibleAlerts.sort((a, b) =>
     Number(b.alert.zone === 'NEAR') - Number(a.alert.zone === 'NEAR') ||
     b.alert.closenessScore - a.alert.closenessScore,
   )
-  const selected = newlyActionableAlerts[0]
+  const selected = voiceEligibleAlerts[0]
   const alertIsReadyToSpeak = selected && config.voiceEnabled && now - lastVoiceAlertTime >= 2500
   if (selected && alertIsReadyToSpeak) {
     const strongestNewlyUrgentAlert = selected.alert

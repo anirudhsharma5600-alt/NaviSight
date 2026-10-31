@@ -8,6 +8,7 @@ interface KnownPersonProfile {
   name: string
   photo: string
   embedding: FaceEmbedding
+  embeddings?: FaceEmbedding[]
   createdAt: number
 }
 
@@ -19,11 +20,16 @@ function readProfiles(): KnownPersonProfile[] {
     if (!stored) return []
     const value: unknown = JSON.parse(stored)
     if (!Array.isArray(value)) return []
-    return value.filter((item): item is KnownPersonProfile =>
-      item && typeof item.id === 'string' && typeof item.name === 'string' &&
-      typeof item.photo === 'string' && Array.isArray(item.embedding) &&
-      item.embedding.every((value: unknown) => typeof value === 'number') && typeof item.createdAt === 'number',
-    )
+    return value.filter((item): item is KnownPersonProfile => {
+      const isEmbedding = (embedding: unknown): embedding is FaceEmbedding =>
+        Array.isArray(embedding) && embedding.length > 0 && embedding.every((entry: unknown) => typeof entry === 'number' && Number.isFinite(entry))
+      return Boolean(
+        item && typeof item.id === 'string' && typeof item.name === 'string' &&
+        typeof item.photo === 'string' && isEmbedding(item.embedding) &&
+        (!item.embeddings || (Array.isArray(item.embeddings) && item.embeddings.every(isEmbedding))) &&
+        typeof item.createdAt === 'number',
+      )
+    })
   } catch {
     return []
   }
@@ -68,7 +74,7 @@ export default function KnownPeoplePage() {
   }>({ id: null, hits: [], misses: 0, announcedId: null, spokenAt: 0 })
   const [profiles, setProfiles] = useState<KnownPersonProfile[]>([])
   const [name, setName] = useState('')
-  const [photoFile, setPhotoFile] = useState<File | null>(null)
+  const [photoFiles, setPhotoFiles] = useState<File[]>([])
   const [saving, setSaving] = useState(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [modelStatus, setModelStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -81,7 +87,7 @@ export default function KnownPeoplePage() {
   }, [])
 
   const saveProfile = async () => {
-    if (!name.trim() || !photoFile || saving) return
+    if (!name.trim() || photoFiles.length === 0 || saving) return
     setSaving(true)
     setError('')
     setMessage('')
@@ -89,22 +95,38 @@ export default function KnownPeoplePage() {
     try {
       setModelStatus('loading')
       await loadKnownFaceModel()
-      const photo = await makeLocalThumbnail(photoFile)
-      const image = new Image()
-      image.src = photo
-      await image.decode()
-      const embedding = await createFaceEmbedding(image)
-      const next = [
-        { id: crypto.randomUUID(), name: name.trim(), photo, embedding, createdAt: Date.now() },
-        ...profiles,
-      ]
+      const newEmbeddings: FaceEmbedding[] = []
+      let photo = ''
+      for (const [index, file] of photoFiles.slice(0, 5).entries()) {
+        const thumbnail = await makeLocalThumbnail(file)
+        if (index === 0) photo = thumbnail
+        const image = new Image()
+        image.src = thumbnail
+        await image.decode()
+        newEmbeddings.push(await createFaceEmbedding(image))
+      }
+
+      const normalizedName = name.trim().toLocaleLowerCase()
+      const existing = profiles.find((profile) => profile.name.trim().toLocaleLowerCase() === normalizedName)
+      const references = [
+        ...(existing?.embeddings?.length ? existing.embeddings : existing ? [existing.embedding] : []),
+        ...newEmbeddings,
+      ].slice(-8)
+      const updatedProfile: KnownPersonProfile = existing
+        ? { ...existing, embedding: references[0], embeddings: references }
+        : { id: crypto.randomUUID(), name: name.trim(), photo, embedding: references[0], embeddings: references, createdAt: Date.now() }
+      const next = existing
+        ? profiles.map((profile) => profile.id === existing.id ? updatedProfile : profile)
+        : [updatedProfile, ...profiles]
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
       setProfiles(next)
       setModelStatus('ready')
       setName('')
-      setPhotoFile(null)
+      setPhotoFiles([])
       if (fileInputRef.current) fileInputRef.current.value = ''
-      setMessage('Photo profile saved on this device.')
+      setMessage(existing
+        ? `Added reference photos for ${existing.name}. This profile now has ${references.length} photos.`
+        : `Photo profile saved with ${references.length} reference photo${references.length === 1 ? '' : 's'}.`)
     } catch (saveError) {
       setModelStatus('error')
       setError(saveError instanceof Error ? saveError.message : 'Could not save this profile on this device.')
@@ -195,7 +217,8 @@ export default function KnownPeoplePage() {
             announcedId: previousHitExpired ? null : previous.announcedId,
           }
           setLiveStatus(`Possible saved match: ${match.profile.name} · ${Math.round(match.similarity * 100)}% similarity`)
-          if (hits.length >= 2 && lastMatchRef.current.announcedId !== match.profile.id && now - lastMatchRef.current.spokenAt >= 4500) {
+          const confirmed = hits.length >= 2 || (match.similarity >= 0.78 && match.margin >= 0.12)
+          if (confirmed && lastMatchRef.current.announcedId !== match.profile.id && now - lastMatchRef.current.spokenAt >= 4500) {
             lastMatchRef.current.announcedId = match.profile.id
             lastMatchRef.current.spokenAt = now
             speak(`सहेजी हुई तस्वीर से संभवतः ${match.profile.name} का मिलान है।`, 'hi-IN')
@@ -260,7 +283,7 @@ export default function KnownPeoplePage() {
             <div>
               <h2 className="font-semibold text-cyan-100">Separate local face-matching mode</h2>
               <p className="mt-1 text-sm leading-relaxed text-cyan-100/70">
-                This mode checks faces only against photo profiles saved in this browser. It does not send photos or face embeddings to a server. If no confident match is found, Navi leaves the person unidentified.
+                This mode checks faces only against photo profiles saved in this browser. Add several clear photos of the same person from different angles for a more reliable match. Photos and face embeddings stay on this device.
               </p>
             </div>
           </div>
@@ -283,22 +306,27 @@ export default function KnownPeoplePage() {
             </label>
 
             <label className="mb-4 block text-sm text-gray-300" htmlFor="known-person-photo">
-              Clear, front-facing photo
+              Clear photos of the same person (up to 5 at a time)
               <input
                 ref={fileInputRef}
                 id="known-person-photo"
                 type="file"
                 accept="image/*"
-                onChange={(event) => setPhotoFile(event.target.files?.[0] || null)}
+                multiple
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files || [])
+                  setPhotoFiles(selected.length > 5 ? [] : selected)
+                  setError(selected.length > 5 ? 'Choose up to 5 photos at a time.' : '')
+                }}
                 className="mt-2 block min-h-12 w-full cursor-pointer rounded-xl border border-white/10 bg-black/20 text-xs text-gray-300 file:mr-3 file:min-h-12 file:border-0 file:bg-cyan-500/15 file:px-4 file:text-cyan-200"
               />
             </label>
 
-            {photoFile && <p className="mb-4 truncate text-xs text-gray-500">Selected: {photoFile.name}</p>}
+            {photoFiles.length > 0 && <p className="mb-4 text-xs text-gray-500">Selected {photoFiles.length} photo{photoFiles.length === 1 ? '' : 's'} · same person, different lighting/angles works best.</p>}
             <button
               type="button"
               onClick={saveProfile}
-              disabled={!name.trim() || !photoFile || saving}
+              disabled={!name.trim() || photoFiles.length === 0 || saving}
               className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 px-4 text-sm font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ImagePlus className="h-4 w-4" /> {saving ? 'Processing locally…' : 'Save photo profile'}
@@ -348,7 +376,7 @@ export default function KnownPeoplePage() {
                     <img src={profile.photo} alt={`Saved portrait of ${profile.name}`} className="h-16 w-16 rounded-lg object-cover" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium text-white">{profile.name}</p>
-                      <p className="mt-1 text-xs text-gray-500">Photo profile · stored locally</p>
+                      <p className="mt-1 text-xs text-gray-500">{profile.embeddings?.length || 1} reference photo{(profile.embeddings?.length || 1) === 1 ? '' : 's'} · stored locally</p>
                     </div>
                     <button
                       type="button"

@@ -2,7 +2,7 @@
 **Document Version:** 3.2.0  
 **Audit Date:** 2026-11-01  
 **Investigation Scope:** Root Cause Analysis of ₹100 and ₹500 Recognition Failures  
-**Status:** ROOT CAUSES IDENTIFIED & VERIFIED EMPIRICALLY  
+**Status:** Template-level causes audited; independent phone-field accuracy remains unverified.
 
 ---
 

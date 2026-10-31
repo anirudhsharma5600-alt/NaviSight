@@ -5,7 +5,7 @@
 **Primary Engine:** `src/services/currencyDetection.ts`  
 **Model Architecture:** MobileNetV3-Small (8-Class Negative-Trained Banknote Detector)  
 **Export Artifact:** `public/models/currency/model.onnx` (5.83 MB) & `dist/models/currency/model.onnx`  
-**Test Suite:** `scripts/test_currency_false_positives.cjs` (10 / 10 Tests Passed — 100%)
+**Test Suite:** `scripts/test_currency_false_positives.cjs` (10 / 10 local sample checks passed; independent phone-field accuracy remains unverified)
 
 ---
 

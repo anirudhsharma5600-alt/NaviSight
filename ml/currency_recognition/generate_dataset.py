@@ -105,6 +105,7 @@ def augment_banknote(raw_img: Image.Image, out_size=(224, 224), is_test=False) -
 
 def main():
     print(f"[INFO] Generating balanced train/val/test splits in: {DATASET_DIR}")
+    print("[WARNING] The same raw banknote templates are augmented into every split. Validation/test scores are not independent estimates of real-phone accuracy.")
     random.seed(42)
     np.random.seed(42)
     
