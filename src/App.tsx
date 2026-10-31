@@ -10,6 +10,7 @@ const About = lazy(() => import('./pages/About'))
 const VoiceAssistant = lazy(() => import('./pages/VoiceAssistantPage'))
 const OCRPage = lazy(() => import('./pages/OCRPage'))
 const NavigationPage = lazy(() => import('./pages/NavigationPage'))
+const StatusPage = lazy(() => import('./pages/StatusPage'))
 
 function App() {
   return (
@@ -23,6 +24,7 @@ function App() {
           <Route path="/voice" element={<VoiceAssistant />} />
           <Route path="/ocr" element={<OCRPage />} />
           <Route path="/navigation" element={<NavigationPage />} />
+          <Route path="/status" element={<StatusPage />} />
         </Routes>
       </Suspense>
       <Footer />

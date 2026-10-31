@@ -9,6 +9,7 @@ const navLinks = [
   { name: 'Live Demo', path: '/dashboard' },
   { name: 'Voice Assistant', path: '/voice' },
   { name: 'Navigation', path: '/navigation' },
+  { name: 'AI Status', path: '/status' },
 ]
 
 export default function Navbar() {

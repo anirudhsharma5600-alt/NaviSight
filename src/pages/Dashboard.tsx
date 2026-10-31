@@ -15,6 +15,7 @@ import {
   resetAnnouncementCooldowns,
 } from '../services/contextEngine'
 import { setCameraStatus } from '../services/modelManager'
+import { naviOn, setLatestDetections } from '../services/naviEventBus'
 
 export default function Dashboard() {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -41,6 +42,20 @@ export default function Dashboard() {
     setModelStatus(getModelStatus())
     return onModelStatusChange(setModelStatus)
   }, [])
+
+  // Listen for voice assistant camera commands via event bus
+  useEffect(() => {
+    const offStart = naviOn('camera:start', () => {
+      if (!cameraActive) startCamera()
+    })
+    const offStop = naviOn('camera:stop', () => {
+      if (cameraActive) stopCamera()
+    })
+    const offDescribe = naviOn('camera:describe', () => {
+      describeSurroundings()
+    })
+    return () => { offStart(); offStop(); offDescribe() }
+  })
 
   // Load model on mount
   useEffect(() => {
@@ -116,6 +131,7 @@ export default function Dashboard() {
         const elapsed = performance.now() - start
 
         setDetections(results)
+        setLatestDetections(results) // Publish to shared store for voice assistant
         setTotalDetected(prev => prev + results.length)
         drawDetections(results)
         setInferenceMs(Math.round(elapsed))
