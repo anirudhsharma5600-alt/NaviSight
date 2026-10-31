@@ -92,3 +92,4 @@ It should **NOT** be relied upon for safety-critical decisions.
 - AI detections may be inaccurate or miss objects entirely.
 - The system does **NOT** confirm whether a path is safe to walk.
 - Always rely on human judgment, guide dogs, or certified assistive devices for real-world navigation.
+

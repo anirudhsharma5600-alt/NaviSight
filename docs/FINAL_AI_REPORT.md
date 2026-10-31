@@ -270,3 +270,4 @@ npm run preview
 Built for hackathon demonstration by the NaviAble AI team.
 
 **Not a substitute for professional assistive technology.** Always rely on certified devices and human assistance for safety-critical situations.
+

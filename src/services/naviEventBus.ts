@@ -35,3 +35,4 @@ export function getLatestDetections(): Detection[] {
 // 'camera:start' — request the dashboard to start camera
 // 'camera:stop'  — request the dashboard to stop camera
 // 'camera:status' — query if camera is active (listeners respond by setting a value)
+

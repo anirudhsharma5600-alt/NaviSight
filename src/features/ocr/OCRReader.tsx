@@ -77,21 +77,82 @@ export default function OCRReader() {
 
   const startCamera = async () => {
     setError('')
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-      })
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        await videoRef.current.play()
-      }
-      setCameraActive(true)
-      setStatus('camera')
-    } catch {
-      setError('Could not access camera. Please grant permission.')
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setError('Camera API is not supported in this browser context (requires HTTPS or localhost).')
       setStatus('error')
+      return
     }
+
+    // Stop existing stream if any
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop())
+      streamRef.current = null
+    }
+
+    let stream: MediaStream | null = null
+    let lastError: any = null
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      })
+    } catch (err: any) {
+      lastError = err
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        lastError = null
+      } catch (retryErr: any) {
+        lastError = retryErr
+      }
+    }
+
+    if (!stream) {
+      const errName = lastError?.name || 'Error'
+      setError(
+        errName === 'NotAllowedError'
+          ? 'Camera permission denied. Please allow camera permissions.'
+          : 'Could not access camera. Check if another app is using it.'
+      )
+      setStatus('error')
+      return
+    }
+
+    streamRef.current = stream
+    const video = videoRef.current
+    if (video) {
+      video.srcObject = stream
+      video.muted = true
+      video.defaultMuted = true
+      video.playsInline = true
+      video.autoplay = true
+
+      // Wait for loadedmetadata
+      await new Promise<void>((resolve) => {
+        if (video.readyState >= 1 && video.videoWidth > 0) {
+          resolve()
+          return
+        }
+        const onLoaded = () => {
+          video.removeEventListener('loadedmetadata', onLoaded)
+          resolve()
+        }
+        video.addEventListener('loadedmetadata', onLoaded, { once: true })
+        setTimeout(resolve, 2000)
+      })
+
+      try {
+        const playPromise = video.play()
+        if (playPromise !== undefined) {
+          await playPromise
+        }
+      } catch (playErr) {
+        console.warn('[OCR Camera] play() rejected:', playErr)
+      }
+    }
+
+    setCameraActive(true)
+    setStatus('camera')
   }
 
   const stopCamera = () => {
@@ -272,19 +333,19 @@ export default function OCRReader() {
                 <video
                   ref={videoRef}
                   className="w-full h-full object-cover"
-                  playsInline
+                  autoPlay
                   muted
-                  style={{ display: cameraActive ? 'block' : 'none' }}
+                  playsInline
                 />
                 <canvas ref={canvasRef} className="hidden" />
                 <canvas
                   ref={previewCanvasRef}
-                  className="w-full h-full object-cover"
+                  className="absolute inset-0 w-full h-full object-cover z-20"
                   style={{ display: status === 'done' || status === 'processing' ? 'block' : 'none' }}
                 />
 
                 {!cameraActive && status !== 'processing' && status !== 'done' && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-4 bg-navy-900/95">
                     <Camera className="w-12 h-12 text-cyan-400/40" />
                     <p className="text-gray-500 text-sm">Start camera or upload an image</p>
                   </div>

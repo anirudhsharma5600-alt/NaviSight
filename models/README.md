@@ -112,3 +112,4 @@ The OCR reader applies optional preprocessing:
 - Firefox and Safari have limited or no speech recognition support
 - Text-to-speech is widely supported across all modern browsers
 - No continuous audio upload — click-to-talk only
+
