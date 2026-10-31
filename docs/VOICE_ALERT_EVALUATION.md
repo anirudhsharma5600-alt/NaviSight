@@ -124,3 +124,4 @@ Modern mobile web engines (WebKit on iOS Safari, Blink on Android Chrome) restri
 | **Intent Parsing Latency (NAVI Voice)** | 0.4 ms | 0.8 ms | < 2 ms | `PASS` |
 | **Duplicate Phrase Rejection Efficiency** | 100% (Within Cooldown) | 100% (Within Cooldown) | 100% | `PASS` |
 | **Memory Allocation** | ~8 KB Queue State | ~8 KB Queue State | < 500 KB | `PASS` |
+

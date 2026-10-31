@@ -315,3 +315,4 @@ class SmartAnnouncementManagerClass {
 }
 
 export const SmartAnnouncementManager = new SmartAnnouncementManagerClass()
+

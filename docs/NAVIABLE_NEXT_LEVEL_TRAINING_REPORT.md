@@ -142,3 +142,4 @@ Measured on standard consumer hardware (Mid-range Android Snapdragon 778G / Chro
 1. **Monocular Depth Ambiguity**: Without an external hardware sensor, single-lens smartphone cameras cannot measure metric distance. All camera-derived distances remain relative estimates.
 2. **Adverse Environmental Lighting**: Banknote classification accuracy degrades below 60% confidence when ambient illuminance falls below 20 lux or under intense point-source specular glare.
 3. **COCO Vocabulary Boundary**: Standard COCO-80 models do not detect architectural accessibility features like doors, stairways, curbs, or drop-offs. Custom vision models are required for these classes.
+

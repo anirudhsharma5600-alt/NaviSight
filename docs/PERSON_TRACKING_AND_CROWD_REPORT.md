@@ -132,3 +132,4 @@ Results: 9/9 Passed (100%)
 - **Zero Facial Recognition**: NaviAble does not extract facial embeddings, landmarks, or identity tags.
 - **Non-Threat Crowd Narration**: Crowds are reported purely as physical occupancy zones; crowds are never categorized as "suspicious" or "threatening".
 - **Local On-Device Execution**: Tracking state coordinates exist strictly in volatile browser RAM and are never transmitted to external servers.
+

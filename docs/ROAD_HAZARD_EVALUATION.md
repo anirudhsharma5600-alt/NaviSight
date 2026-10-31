@@ -115,3 +115,4 @@ All road hazard detections are dispatched through `SmartAnnouncementManager` at 
 1. **Cloud / High-Performance GPU Training**: Execute `ml/pothole_detection/train_yolov8.py` on an NVIDIA A100 or RTX 4090 instance using the RDD2022 dataset to generate `road_hazard_yolov8n.onnx`.
 2. **Shadow Invariance Training**: Train using extensive shadow-augmentation and random illumination drops to eradicate shadow false positives.
 3. **Sensor Fusion**: Integrate gyroscope / accelerometer IMU data to correlate smartphone tilt with camera ground-plane perspective.
+

@@ -135,3 +135,4 @@
    - Monocular camera bounding boxes were previously described with distance terminology that could mislead users. Relative zones (`NEAR`, `MEDIUM`, `FAR`) and distinct sensor labels must be strictly enforced.
 4. **Missing Road Damage Deep Learning Weights:**
    - YOLOv8n RDD2022 model is not yet trained locally due to multi-GB dataset and GPU requirements. Must continue to be honestly reported as `not_trained`.
+

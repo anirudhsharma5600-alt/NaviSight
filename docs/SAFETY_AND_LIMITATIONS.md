@@ -79,3 +79,4 @@ NaviAble is engineered to protect user privacy in private and public spaces:
    - **Stop All Audio**: Halts all spoken announcements within 5 ms.
 3. **No Biometric Identification**:
    - Pedestrian tracking extracts only spatial bounding boxes. No facial recognition, facial landmark analysis, age, gender, or biometric identification is performed.
+
