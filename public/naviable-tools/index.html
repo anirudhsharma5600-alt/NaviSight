@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#0F1114" />
+    <title>NaviAble AI Tools</title>
+    <meta name="description" content="On-demand, on-device sign reading and object description tools." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./tools.css" />
+    <script src="./tools.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <header class="site-header">
+      <a class="wordmark" href="#about" aria-label="NaviAble AI tools home">
+        <span>NaviAble</span><span class="wordmark-ai">AI</span><span class="brand-dot" aria-hidden="true"></span>
+      </a>
+      <div class="header-actions">
+        <p id="camera-status" class="camera-status">Camera: off</p>
+        <button id="emergency-stop" class="button emergency-button" type="button">Emergency stop</button>
+      </div>
+    </header>
+
+    <main id="main-content" class="page-shell">
+      <section class="intro" aria-labelledby="page-title">
+        <p class="eyebrow">On-demand visual assistance</p>
+        <h1 id="page-title">NaviAble AI tools</h1>
+        <p>Short, private camera scans for printed signs and common objects. Camera frames stay on this device.</p>
+      </section>
+
+      <nav class="tab-list" role="tablist" aria-label="NaviAble tools">
+        <a id="tab-sign" class="tab-link" href="#sign" role="tab" aria-controls="panel-sign">Read a sign</a>
+        <a id="tab-objects" class="tab-link" href="#objects" role="tab" aria-controls="panel-objects">Describe objects</a>
+        <a id="tab-eval" class="tab-link" href="#eval" role="tab" aria-controls="panel-eval">Evaluation</a>
+        <a id="tab-about" class="tab-link" href="#about" role="tab" aria-controls="panel-about">About</a>
+      </nav>
+
+      <p id="status-message" class="status-message" role="status" aria-live="polite" aria-atomic="true"></p>
+
+      <section id="camera-card" class="camera-card card" aria-label="Camera preview" hidden>
+        <div class="camera-frame">
+          <video id="camera-preview" autoplay muted playsinline aria-label="Live camera preview"></video>
+          <div id="sign-guide" class="sign-guide" aria-hidden="true" hidden>
+            <span class="guide-label">Place sign inside frame</span>
+          </div>
+          <p id="camera-placeholder" class="camera-placeholder">Camera preview appears here after you start a scan.</p>
+        </div>
+        <p class="privacy-note">Camera: <span class="camera-state-inline">off</span>. Frames are processed in memory and are not uploaded or saved.</p>
+        <div class="camera-controls">
+          <button id="start-camera" class="button secondary-button" type="button">Start camera</button>
+          <button id="stop-camera" class="button secondary-button" type="button" disabled>Stop camera</button>
+        </div>
+        <p id="camera-error" class="error-message" hidden></p>
+      </section>
+
+      <section id="panel-sign" class="tab-panel card" role="tabpanel" aria-labelledby="tab-sign" hidden>
+        <div class="panel-heading">
+          <p class="eyebrow">Printed text</p>
+          <h2>Read a sign</h2>
+          <p>Point the camera at a sign and scan when you are ready. English is the only text language available in this prototype.</p>
+        </div>
+        <div class="form-row">
+          <label class="field-label" for="sign-language">Language</label>
+          <select id="sign-language" class="select-control">
+            <option value="eng">English</option>
+          </select>
+          <span class="status-badge badge-progress"><span aria-hidden="true">◐</span> in-progress</span>
+        </div>
+        <label class="toggle-row" for="aiming-help">
+          <input id="aiming-help" type="checkbox" />
+          <span>Aiming help <span class="status-badge badge-progress"><span aria-hidden="true">◐</span> Experimental</span></span>
+        </label>
+        <p class="field-help">Optional audio hints for lighting, blur, or text close to the camera frame edge. Off by default.</p>
+        <div class="button-row">
+          <button id="read-sign" class="button primary-button" type="button" disabled>Read a sign</button>
+          <button id="repeat-sign" class="button secondary-button" type="button" disabled>Repeat</button>
+          <button id="stop-sign-speech" class="button secondary-button" type="button" disabled>Stop speech</button>
+        </div>
+        <section class="result-card" aria-labelledby="sign-result-title">
+          <h3 id="sign-result-title">Scan result</h3>
+          <p id="sign-result" class="result-text">No scan result yet.</p>
+          <p id="sign-metrics" class="metrics-text">Response time: Not measured yet</p>
+        </section>
+        <section id="sign-rating" class="rating-card" aria-label="Rate the sign reading result" hidden>
+          <p>Was the result correct?</p>
+          <div class="button-row rating-buttons">
+            <button class="button secondary-button" type="button" data-rating="correct" data-rating-type="sign">Correct</button>
+            <button class="button secondary-button" type="button" data-rating="wrong" data-rating-type="sign">Wrong</button>
+            <button class="button secondary-button" type="button" data-rating="skip" data-rating-type="sign">Skip</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="panel-objects" class="tab-panel card" role="tabpanel" aria-labelledby="tab-objects" hidden>
+        <div class="panel-heading">
+          <p class="eyebrow">Common objects</p>
+          <h2>Describe objects</h2>
+          <p>The object name and approximate image position are based on one camera frame.</p>
+        </div>
+        <p id="object-model-state" class="model-state">Object recognition files load when this tab is opened.</p>
+        <div class="button-row">
+          <button id="describe-objects" class="button primary-button" type="button" disabled>Describe objects</button>
+        </div>
+        <p class="field-help">Position is approximate, within the camera image. It is not a distance.</p>
+        <section class="result-card" aria-labelledby="object-result-title">
+          <h3 id="object-result-title">Scan result</h3>
+          <p id="object-result" class="result-text">No scan result yet.</p>
+          <p id="object-metrics" class="metrics-text">Detection time: Not measured yet. Response time: Not measured yet</p>
+        </section>
+        <section id="object-rating" class="rating-card" aria-label="Rate the object and position result" hidden>
+          <p>Were the object names and positions correct?</p>
+          <div class="button-row rating-buttons">
+            <button class="button secondary-button" type="button" data-rating="correct" data-rating-type="objects">Correct</button>
+            <button class="button secondary-button" type="button" data-rating="wrong" data-rating-type="objects">Wrong</button>
+            <button class="button secondary-button" type="button" data-rating="skip" data-rating-type="objects">Skip</button>
+          </div>
+        </section>
+      </section>
+
+      <section id="panel-eval" class="tab-panel card" role="tabpanel" aria-labelledby="tab-eval" hidden>
+        <div class="panel-heading">
+          <p class="eyebrow">Local-only records</p>
+          <h2>Evaluation</h2>
+          <p>Summaries below are calculated from recorded scans and feedback only.</p>
+        </div>
+        <label class="toggle-row" for="save-test-log">
+          <input id="save-test-log" type="checkbox" />
+          <span>Save test log on this device</span>
+        </label>
+        <p class="field-help">When enabled, scan details and submitted feedback are kept in this browser on this device until you clear them. Images are never stored.</p>
+        <div class="summary-grid" aria-label="Evaluation summary">
+          <article class="summary-card">
+            <h3>Sign-reading success</h3>
+            <p id="summary-sign">Not measured yet</p>
+          </article>
+          <article class="summary-card">
+            <h3>Object and position correct</h3>
+            <p id="summary-objects">Not measured yet</p>
+          </article>
+          <article class="summary-card">
+            <h3>Median response time</h3>
+            <p id="summary-median">Not measured yet</p>
+          </article>
+        </div>
+        <div class="button-row">
+          <button id="export-csv" class="button secondary-button" type="button">Export CSV</button>
+          <button id="clear-log" class="button secondary-button" type="button">Clear log</button>
+        </div>
+        <section class="feedback-card" aria-labelledby="feedback-heading">
+          <h3 id="feedback-heading">Supervised session feedback</h3>
+          <p class="field-help">Use only in a supervised evaluation with participant consent.</p>
+          <form id="feedback-form">
+            <label class="form-field" for="feedback-start">Could you start the scan without help?
+              <select id="feedback-start" class="select-control" required>
+                <option value="">Choose an answer</option><option value="yes">Yes</option><option value="no">No</option>
+              </select>
+            </label>
+            <label class="form-field" for="feedback-repeat">Could you repeat and stop the speech?
+              <select id="feedback-repeat" class="select-control" required>
+                <option value="">Choose an answer</option><option value="yes">Yes</option><option value="no">No</option>
+              </select>
+            </label>
+            <label class="form-field" for="feedback-information">Did you get the information you needed?
+              <select id="feedback-information" class="select-control" required>
+                <option value="">Choose an answer</option><option value="yes">Yes</option><option value="no">No</option>
+              </select>
+            </label>
+            <label class="form-field" for="feedback-comment">Comment (optional)
+              <textarea id="feedback-comment" rows="4" maxlength="1200"></textarea>
+            </label>
+            <label class="toggle-row consent-row" for="feedback-consent">
+              <input id="feedback-consent" type="checkbox" required />
+              <span>I confirm this supervised session has participant consent.</span>
+            </label>
+            <button id="submit-feedback" class="button secondary-button" type="submit" disabled>Save feedback on this device</button>
+          </form>
+        </section>
+      </section>
+
+      <section id="panel-about" class="tab-panel card" role="tabpanel" aria-labelledby="tab-about" hidden>
+        <div class="panel-heading">
+          <p class="eyebrow">About this prototype</p>
+          <h2>About NaviAble AI</h2>
+        </div>
+        <section class="about-section">
+          <h3>What it is</h3>
+          <p>NaviAble AI is an on-demand visual assistance prototype for blind and low-vision users. It starts with printed signs and common objects.</p>
+        </section>
+        <section class="about-section">
+          <h3>How it works</h3>
+          <ol>
+            <li>Open when you need visual information.</li>
+            <li>Choose Read a sign or Describe objects.</li>
+            <li>Point the camera for a short scan.</li>
+            <li>OCR reads the text or the detector names common objects with left/centre/right in the image.</li>
+            <li>The result is spoken and can be repeated or stopped.</li>
+          </ol>
+        </section>
+        <section class="about-section">
+          <h3>Expected impact</h3>
+          <p>Easier access to these specific tasks through audio. We have not yet proven this impact.</p>
+        </section>
+        <section class="about-section">
+          <h3>Evaluation</h3>
+          <p>Sign-reading success, object and position results, response time, feedback from blind and low-vision users.</p>
+        </section>
+        <section class="about-section">
+          <h3>Where it fits</h3>
+          <p>Products such as Meta's Ray-Ban AI glasses and Be My Eyes already offer hands-free visual assistance. NaviAble does not claim to replace them or to have a better AI model. Our phone-first prototype is designed for short, on-demand use without dedicated glasses. Our hypothesis is that this focused workflow is useful, and user testing will tell us whether it is.</p>
+        </section>
+        <section class="about-section">
+          <h3>Next</h3>
+          <p>Audio guidance for aiming the camera. After validating the phone experience we plan to explore wearable integration where the device platform supports it.</p>
+        </section>
+        <section class="about-section">
+          <h3>Limits</h3>
+          <p>NaviAble does not provide safe-route guidance or exact object distances.</p>
+        </section>
+        <section class="about-section" aria-labelledby="status-list-heading">
+          <h3 id="status-list-heading">Feature status</h3>
+          <ul class="feature-status-list">
+            <li><span class="status-badge badge-progress"><span aria-hidden="true">◐</span> in-progress</span> Sign reading</li>
+            <li><span class="status-badge badge-progress"><span aria-hidden="true">◐</span> in-progress</span> Object awareness with left/centre/right</li>
+            <li><span class="status-badge badge-progress"><span aria-hidden="true">◐</span> in-progress</span> Spoken results with repeat and stop</li>
+            <li><span class="status-badge badge-progress"><span aria-hidden="true">◐</span> in-progress</span> Evaluation log</li>
+            <li><span class="status-badge badge-progress"><span aria-hidden="true">◐</span> in-progress</span> Aiming help (experimental)</li>
+            <li><span class="status-badge badge-planned"><span aria-hidden="true">○</span> planned</span> Wearable integration</li>
+          </ul>
+        </section>
+      </section>
+    </main>
+    <footer class="site-footer">NaviAble AI · Local prototype · Camera frames are not uploaded or saved.</footer>
+  </body>
+</html>
