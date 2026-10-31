@@ -60,3 +60,4 @@ https://prairie-respondents-greater-restrict.trycloudflare.com
 4. Tap **"Speak Route"** to hear Navi verbally summarize your route, distance, and duration.
 5. Tap **"Show My Identity Badge"** to display your 24-hour voluntary cryptographic QR code.
 6. Open **"Vision"** or **"Currency"** to verify that camera detection and currency scanning operate with zero false positives.
+

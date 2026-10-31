@@ -87,3 +87,4 @@ If the user does not have a Gemini API key or is walking through an area with no
 - Currency recognition runs on onnxruntime-web MobileNetV3.
 - GPS and route tracking run directly on device hardware.
 - The user is never blocked or left without assistive capabilities due to lack of cloud connectivity.
+

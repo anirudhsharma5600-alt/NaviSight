@@ -201,3 +201,4 @@ class GPSServiceClass {
 }
 
 export const GPSService = new GPSServiceClass()
+

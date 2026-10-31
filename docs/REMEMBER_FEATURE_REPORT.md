@@ -122,3 +122,4 @@ The subsystem was verified against `scripts/test_remember_feature.cjs` with 100%
 13. `src/assistant/NaviLiveSession.ts` — Real-time multimodal vision companion with frame sampler (~1 FPS) and speech interruption.
 14. `src/pages/RememberPage.tsx` — 4-tab accessible dashboard with high contrast and voice synthesis.
 15. `src/App.tsx`, `Navbar.tsx`, `BottomNav.tsx`, `Home.tsx` — Seamless cross-platform navigation integration.
+

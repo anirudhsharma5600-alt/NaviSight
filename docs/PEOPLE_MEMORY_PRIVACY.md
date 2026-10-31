@@ -93,3 +93,4 @@ NaviAble provides a dedicated **Quiet Public Announcement Mode**:
 | **EU GDPR Art. 9** | Prohibition of biometric data processing without explicit consent | Zero face vectors or facial recognition models used |
 | **California CCPA/CPRA** | Right to delete & limit use of sensitive personal info | Immediate client-side revocation & deletion in 1 tap |
 | **UN Convention (CRPD)** | Accessible assistive technology respecting human autonomy | High-contrast UI, screen-reader compatibility, non-intrusive |
+
