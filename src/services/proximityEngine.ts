@@ -1,5 +1,6 @@
 import type { Detection } from './objectDetection'
 import { SmartAnnouncementManager } from './SmartAnnouncementManager'
+import { speak } from './speechService'
 
 // ─── Proximity State Machine ───
 

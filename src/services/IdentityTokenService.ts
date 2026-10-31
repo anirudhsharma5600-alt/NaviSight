@@ -133,7 +133,7 @@ class IdentityTokenServiceClass {
     const jsonStr = JSON.stringify(payload)
     const base64Data = typeof btoa !== 'undefined' 
       ? btoa(encodeURIComponent(jsonStr)) 
-      : Buffer.from(jsonStr).toString('base64')
+      : ((globalThis as unknown as { Buffer?: { from: (s: string) => { toString: (enc: string) => string } } }).Buffer?.from(jsonStr).toString('base64') || '')
 
     const sigHex = await this.signPayload(base64Data)
     const token = `${TOKEN_PREFIX}${base64Data}.${sigHex}`
@@ -192,7 +192,7 @@ class IdentityTokenServiceClass {
     try {
       const decodedJson = typeof atob !== 'undefined'
         ? decodeURIComponent(atob(base64Data))
-        : Buffer.from(base64Data, 'base64').toString('utf-8')
+        : ((globalThis as unknown as { Buffer?: { from: (s: string, enc: string) => { toString: (enc: string) => string } } }).Buffer?.from(base64Data, 'base64').toString('utf-8') || '')
       payload = JSON.parse(decodedJson)
     } catch {
       return { valid: false, reason: 'Failed to parse identity token payload.' }
