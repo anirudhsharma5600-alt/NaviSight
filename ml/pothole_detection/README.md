@@ -40,3 +40,4 @@ This pipeline fine-tunes a `YOLOv8n` object detector to recognize 4 primary road
 5. The script automatically exports the final weights to ONNX (`pothole_model.onnx`).
 6. Copy `pothole_model.onnx` to NaviAble AI at:
    `public/models/pothole/model.onnx`
+

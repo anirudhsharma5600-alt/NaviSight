@@ -115,3 +115,4 @@ This report outlines the technical requirements, dataset criteria, model configu
 2. Confirm exported `.onnx` files are generated without truncation.
 3. Move files to `public/models/currency/model.onnx` and `public/models/pothole/model.onnx`.
 4. The NaviAble AI application automatically checks for model availability using zero-cost HTTP HEAD requests and activates live camera inference upon model detection.
+

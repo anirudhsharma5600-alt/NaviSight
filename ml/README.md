@@ -50,3 +50,4 @@ When training finishes, models are exported to ONNX format:
    - Currency: `public/models/currency/model.onnx`
    - Road Hazards: `public/models/pothole/model.onnx`
 2. NaviAble AI's web services (`src/services/currencyDetection.ts` and `src/services/potholeDetection.ts`) will automatically detect the presence of these model files via HTTP HEAD requests and activate real inference mode.
+
