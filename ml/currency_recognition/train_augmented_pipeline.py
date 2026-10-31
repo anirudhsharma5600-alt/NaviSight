@@ -212,6 +212,8 @@ def train(epochs=6, batch_size=32, lr=5e-4):
     # Save evaluation results to JSON
     report = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "metric_validity": "SYNTHETIC_TEMPLATE_SPLIT_ONLY",
+        "evaluation_caveat": "The current generator reuses the same raw banknote templates across train, validation, and test via different augmentations. These metrics are not independent real-world accuracy estimates and must not be used as phone-field accuracy claims.",
         "model_architecture": "MobileNetV3-Small",
         "input_resolution": "224x224x3",
         "classes": [IDX_TO_NAME[i] for i in range(len(CLASSES))],

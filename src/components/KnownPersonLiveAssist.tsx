@@ -27,8 +27,11 @@ function readLocalProfiles(): FaceProfileMatch[] {
     return (value as StoredKnownPerson[]).filter((profile) =>
       profile && typeof profile.id === 'string' && typeof profile.name === 'string' &&
       profile.name.trim().length > 0 && Array.isArray(profile.embedding) &&
-      profile.embedding.length > 0 && profile.embedding.every((entry) => Number.isFinite(entry)),
-    ).map(({ id, name, embedding }) => ({ id, name, embedding }))
+      profile.embedding.length > 0 && profile.embedding.every((entry) => Number.isFinite(entry)) &&
+      (!profile.embeddings || (Array.isArray(profile.embeddings) && profile.embeddings.every((embedding) =>
+        Array.isArray(embedding) && embedding.length > 0 && embedding.every((entry) => Number.isFinite(entry)),
+      )))
+    ).map(({ id, name, embedding, embeddings }) => ({ id, name, embedding, embeddings }))
   } catch {
     return []
   }
@@ -108,7 +111,7 @@ export default function KnownPersonLiveAssist({
         candidateHits = candidateHits.filter((time) => now - time <= 6000)
         candidateHits.push(now)
         candidateId = id
-        const confirmed = candidateHits.length >= 2
+        const confirmed = candidateHits.length >= 2 || (match.similarity >= 0.78 && match.margin >= 0.12)
         onStatus(confirmed
           ? `Possible saved match: ${match.profile.name} (${Math.round(match.similarity * 100)}%).`
           : 'Checking one face against saved family photos…')

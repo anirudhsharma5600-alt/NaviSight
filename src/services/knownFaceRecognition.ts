@@ -6,11 +6,13 @@ export interface FaceProfileMatch {
   id: string
   name: string
   embedding: FaceEmbedding
+  embeddings?: FaceEmbedding[]
 }
 
 export interface FaceMatchResult {
   profile: FaceProfileMatch | null
   similarity: number
+  margin: number
   faceCount: number
 }
 
@@ -94,31 +96,38 @@ export async function findKnownFace(
   const results = await getHuman().detect(input)
   const faces = (results.face || []).filter((face) => face.embedding && (face.score ?? 0) >= 0.5)
   if (faces.length !== 1 || !faces[0].embedding || profiles.length === 0) {
-    return { profile: null, similarity: 0, faceCount: faces.length }
+    return { profile: null, similarity: 0, margin: 0, faceCount: faces.length }
   }
 
   let best: FaceProfileMatch | null = null
   let bestSimilarity = 0
   let secondBestSimilarity = 0
   for (const profile of profiles) {
-    if (profile.embedding.length !== faces[0].embedding.length) continue
-    const similarity = getHuman().match.similarity(faces[0].embedding, profile.embedding)
-    if (Number.isFinite(similarity)) {
-      if (similarity > bestSimilarity) {
-        secondBestSimilarity = bestSimilarity
-        best = profile
-        bestSimilarity = similarity
-      } else if (similarity > secondBestSimilarity) {
-        secondBestSimilarity = similarity
+    const references = profile.embeddings?.length ? profile.embeddings : [profile.embedding]
+    let profileSimilarity = 0
+    for (const reference of references) {
+      if (reference.length !== faces[0].embedding.length) continue
+      const similarity = getHuman().match.similarity(faces[0].embedding, reference)
+      if (Number.isFinite(similarity) && similarity > profileSimilarity) {
+        profileSimilarity = similarity
       }
+    }
+
+    if (profileSimilarity > bestSimilarity) {
+      secondBestSimilarity = bestSimilarity
+      best = profile
+      bestSimilarity = profileSimilarity
+    } else if (profileSimilarity > secondBestSimilarity) {
+      secondBestSimilarity = profileSimilarity
     }
   }
 
-  // A single saved photo and a different live pose can lower the score. Keep
-  // recognition cautious with a relative-margin check and repeated-frame
-  // confirmation in the live callers rather than an overly strict one-frame gate.
-  if (bestSimilarity < 0.6 || (profiles.length > 1 && bestSimilarity - secondBestSimilarity < 0.04)) {
-    return { profile: null, similarity: bestSimilarity, faceCount: faces.length }
+  const margin = profiles.length > 1 ? bestSimilarity - secondBestSimilarity : bestSimilarity
+
+  // Keep recognition cautious with a relative-margin check. Live callers use
+  // repeated-frame evidence when a match is not exceptionally strong.
+  if (bestSimilarity < 0.6 || (profiles.length > 1 && margin < 0.04)) {
+    return { profile: null, similarity: bestSimilarity, margin, faceCount: faces.length }
   }
-  return { profile: best, similarity: bestSimilarity, faceCount: faces.length }
+  return { profile: best, similarity: bestSimilarity, margin, faceCount: faces.length }
 }
