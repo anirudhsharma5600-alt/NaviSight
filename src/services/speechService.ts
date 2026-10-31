@@ -1,3 +1,5 @@
+import { emit } from '../integration/bus'
+
 // ─── Types ───
 
 export type SpeechStatus = 'idle' | 'speaking' | 'paused'
@@ -60,6 +62,7 @@ export function speak(text: string, lang = 'en-US'): void {
 
   currentUtterance = utterance
   window.speechSynthesis.speak(utterance)
+  try { emit('speech', { text, t: performance.now() }) } catch { /* Preserve speech behavior if event reporting fails. */ }
 }
 
 export function queueSpeak(text: string): void {

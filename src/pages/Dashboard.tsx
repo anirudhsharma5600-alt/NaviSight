@@ -11,6 +11,7 @@ import {
   type Detection, type ModelStatus,
 } from '../services/objectDetection'
 import { speak, stopSpeaking } from '../services/speechService'
+import TestLog from '../integration/TestLog'
 import {
   generateSceneDescription, generateNewDetectionAnnouncements,
   resetAnnouncementCooldowns,
@@ -976,6 +977,7 @@ export default function Dashboard() {
                 ))}
               </div>
             </div>
+            <TestLog />
           </motion.div>
         </div>
       </div>
