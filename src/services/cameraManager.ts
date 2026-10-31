@@ -344,3 +344,4 @@ export function stopCameraFeed(targetVideoElement?: HTMLVideoElement | null): vo
     videoHeight: 0,
   }
 }
+

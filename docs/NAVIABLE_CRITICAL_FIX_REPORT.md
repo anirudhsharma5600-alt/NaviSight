@@ -89,3 +89,4 @@
 4. **Offline Inference:** Headless model runner successfully detects test targets in under 3.1 seconds per frame on CPU (25–35 ms in browser WebGL).
 5. **Web Audio API:** Oscillator synthesized tones verified across 550 Hz, 800 Hz, 1000 Hz, 1120 Hz, and 1250 Hz.
 6. **Git Synchronization:** All changes committed and pushed to `https://github.com/anirudhsharma5600-alt/NaviSight.git` on branch `test`.
+
