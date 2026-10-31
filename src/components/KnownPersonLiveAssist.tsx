@@ -14,7 +14,8 @@ interface KnownPersonLiveAssistProps {
   cameraActive: boolean
   video: HTMLVideoElement | null
   language: 'hi' | 'en'
-  canAnalyze: () => boolean
+  beginAnalysis: () => boolean
+  endAnalysis: () => void
   onStatus: (status: string) => void
 }
 
@@ -39,7 +40,8 @@ export default function KnownPersonLiveAssist({
   cameraActive,
   video,
   language,
-  canAnalyze,
+  beginAnalysis,
+  endAnalysis,
   onStatus,
 }: KnownPersonLiveAssistProps) {
   useEffect(() => {
@@ -60,12 +62,16 @@ export default function KnownPersonLiveAssist({
     let inFlight = false
     let timer = 0
     let candidateId: string | null = null
-    let candidateFrames = 0
+    let candidateHits: number[] = []
+    let missedFrames = 0
     let announcedId: string | null = null
     let lastAttemptAt = 0
 
     const runOneFrame = async () => {
-      if (stopped || inFlight || !video || video.readyState < 2 || !canAnalyze()) return
+      if (stopped || inFlight || !video || video.readyState < 2 || !beginAnalysis()) {
+        if (!stopped) timer = window.setTimeout(() => { void runOneFrame() }, 250)
+        return
+      }
       inFlight = true
       try {
         const { findKnownFace } = await import('../services/knownFaceRecognition')
@@ -73,9 +79,12 @@ export default function KnownPersonLiveAssist({
         if (stopped) return
 
         if (!match.profile) {
-          candidateId = null
-          candidateFrames = 0
-          announcedId = null
+          missedFrames += 1
+          if (missedFrames >= 3 || (candidateHits.length > 0 && Date.now() - candidateHits[candidateHits.length - 1] > 6000)) {
+            candidateId = null
+            candidateHits = []
+            announcedId = null
+          }
           onStatus(match.faceCount > 1
             ? 'More than one face is visible; family matching is waiting for one face.'
             : match.faceCount === 1
@@ -85,9 +94,21 @@ export default function KnownPersonLiveAssist({
         }
 
         const id = match.profile.id
-        candidateFrames = candidateId === id ? candidateFrames + 1 : 1
+        const now = Date.now()
+        if (candidateId === id && candidateHits.length > 0 && now - candidateHits[candidateHits.length - 1] > 6000) {
+          candidateHits = []
+          announcedId = null
+        }
+        if (candidateId !== id) {
+          candidateId = id
+          candidateHits = []
+          announcedId = null
+        }
+        missedFrames = 0
+        candidateHits = candidateHits.filter((time) => now - time <= 6000)
+        candidateHits.push(now)
         candidateId = id
-        const confirmed = candidateFrames >= 3
+        const confirmed = candidateHits.length >= 2
         onStatus(confirmed
           ? `Possible saved match: ${match.profile.name} (${Math.round(match.similarity * 100)}%).`
           : 'Checking one face against saved family photos…')
@@ -107,6 +128,8 @@ export default function KnownPersonLiveAssist({
         }
       } finally {
         inFlight = false
+        endAnalysis()
+        if (!stopped) timer = window.setTimeout(() => { void runOneFrame() }, 500)
       }
     }
 
@@ -116,7 +139,7 @@ export default function KnownPersonLiveAssist({
       .then(() => {
         if (stopped) return
         onStatus('Saved-family matching is on. Only saved photos are checked.')
-        timer = window.setInterval(() => { void runOneFrame() }, 1400)
+        timer = window.setTimeout(() => { void runOneFrame() }, 200)
       })
       .catch((error) => {
         if (!stopped) onStatus(error instanceof Error ? `Family model unavailable: ${error.message}` : 'Family model unavailable.')
@@ -124,9 +147,9 @@ export default function KnownPersonLiveAssist({
 
     return () => {
       stopped = true
-      if (timer) window.clearInterval(timer)
+      if (timer) window.clearTimeout(timer)
     }
-  }, [enabled, cameraActive, video, language, canAnalyze, onStatus])
+  }, [enabled, cameraActive, video, language, beginAnalysis, endAnalysis, onStatus])
 
   return null
 }

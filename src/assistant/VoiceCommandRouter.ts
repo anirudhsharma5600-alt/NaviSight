@@ -14,7 +14,7 @@
 import { VoiceManager } from '../services/VoiceAnnouncementManager'
 import { RoadIntelligence } from '../services/roadIntelligence'
 import { getLatestDetections, naviEmit } from '../services/naviEventBus'
-import { recognizeBanknote, loadCurrencyModel } from '../services/currencyDetection'
+import { recognizeStableBanknote, loadCurrencyModel } from '../services/currencyDetection'
 import { analyzeRoadSurfaceHeuristic } from '../services/potholeDetection'
 import { AssistantState, type AssistantLanguage } from './AssistantState'
 import { VoiceResponse } from './VoiceResponse'
@@ -202,7 +202,7 @@ class VoiceCommandRouterEngine {
       await loadCurrencyModel()
 
       // Execute actual banknote inference on current live frame
-      const res = await recognizeBanknote(videoEl, {
+      const res = await recognizeStableBanknote(videoEl, {
         language: lang,
         autoSpeak: false, // Router controls final announcement
         forceAnnouncement: true,
@@ -221,7 +221,7 @@ class VoiceCommandRouterEngine {
 
       // Model uncertain or note not clearly framed
       return {
-        spokenText: VoiceResponse.getCurrencyUncertain(lang),
+        spokenText: res.spokenFeedback || VoiceResponse.getCurrencyUncertain(lang),
         success: false,
         actionTaken: 'CURRENCY_UNCERTAIN',
         payload: res,

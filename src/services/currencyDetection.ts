@@ -1079,6 +1079,144 @@ export async function recognizeBanknote(
   }
 }
 
+let stableScanQueue: Promise<void> = Promise.resolve()
+
+/**
+ * Confirms a single-note reading across two agreeing live frames, using a
+ * third frame only when the first two disagree. This suppresses changing
+ * one-frame guesses from full-scene camera views and serializes concurrent
+ * voice/button scans so they cannot compete for the same ONNX session.
+ */
+export async function recognizeStableBanknote(
+  videoOrCanvas: HTMLVideoElement | HTMLCanvasElement,
+  options?: {
+    language?: 'en' | 'hi' | 'pa'
+    autoSpeak?: boolean
+    speechVolume?: number
+    forceAnnouncement?: boolean
+  },
+): Promise<CurrencyRecognitionResult> {
+  const previousScan = stableScanQueue
+  let releaseQueue: () => void = () => {}
+  stableScanQueue = new Promise<void>((resolve) => { releaseQueue = resolve })
+  await previousScan
+
+  try {
+    const lang = options?.language || 'en'
+    const shouldSpeak = options?.autoSpeak !== false
+    const readings: CurrencyRecognitionResult[] = []
+
+    for (let index = 0; index < 3; index++) {
+      readings.push(await recognizeBanknote(videoOrCanvas, {
+        language: lang,
+        autoSpeak: false,
+        forceAnnouncement: false,
+      }))
+
+      if (readings[index].displayName === 'Currency model unavailable' || readings[index].displayName === 'Error') break
+
+      const confidentCount = readings.filter((result) =>
+        result.isConfident && result.state === 'DENOMINATION_RECOGNISED' && result.amount > 0,
+      ).length
+      if (index === 1 && confidentCount === 2 && readings[0].denomination === readings[1].denomination) break
+      if (index < 2) await new Promise((resolve) => window.setTimeout(resolve, 90))
+    }
+
+    const inferenceMs = readings.reduce((total, result) => total + result.inferenceMs, 0)
+    const votes = new Map<CurrencyDenomination, CurrencyRecognitionResult[]>()
+    for (const reading of readings) {
+      if (!reading.isConfident || reading.state !== 'DENOMINATION_RECOGNISED' || reading.amount <= 0) continue
+      const existing = votes.get(reading.denomination) || []
+      existing.push(reading)
+      votes.set(reading.denomination, existing)
+    }
+
+    const winner = [...votes.entries()].sort((a, b) => b[1].length - a[1].length)[0]
+    let result: CurrencyRecognitionResult
+    const terminalFailure = readings.find((reading) =>
+      reading.displayName === 'Currency model unavailable' || reading.displayName === 'Error',
+    )
+    if (terminalFailure) {
+      result = { ...terminalFailure, inferenceMs, timestamp: Date.now() }
+    } else if (winner && winner[1].length >= 2) {
+      const strongest = winner[1].reduce((best, current) => current.confidence > best.confidence ? current : best)
+      const averageConfidence = Math.round(winner[1].reduce((sum, item) => sum + item.confidence, 0) / winner[1].length)
+      result = {
+        ...strongest,
+        confidence: averageConfidence,
+        rawConfidence: averageConfidence,
+        recognition_confidence: Math.round((averageConfidence / 100) * 1000) / 1000,
+        presenceConfidence: Math.round(readings.reduce((sum, item) => sum + item.presenceConfidence, 0) / readings.length * 100) / 100,
+        inferenceMs,
+        timestamp: Date.now(),
+      }
+    } else if (winner || readings.some((reading) => reading.banknotePresence)) {
+      const languageIsHindi = lang === 'hi'
+      const languageIsPunjabi = lang === 'pa'
+      const spokenFeedback = languageIsHindi
+        ? 'अलग-अलग फ्रेम में नोट की पहचान मेल नहीं खाई। कृपया एक नोट को स्थिर रखकर फिर स्कैन करें।'
+        : languageIsPunjabi
+          ? 'ਵੱਖ-ਵੱਖ ਫਰੇਮਾਂ ਵਿੱਚ ਨੋਟ ਦੀ ਪਛਾਣ ਨਹੀਂ ਮਿਲੀ। ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਨੋਟ ਸਥਿਰ ਰੱਖ ਕੇ ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।'
+          : 'The note reading was not stable across frames. Hold one note still and scan again.'
+      const bestEvidence = readings.reduce((best, current) => current.confidence > best.confidence ? current : best)
+      result = {
+        ...bestEvidence,
+        state: 'LOW_CONFIDENCE',
+        banknotePresence: true,
+        denomination: 'NEGATIVE',
+        note_design: 'Uncertain Note Design',
+        recognition_confidence: 0,
+        amount: 0,
+        displayName: 'Not confirmed',
+        confidence: bestEvidence.confidence,
+        colorName: 'None',
+        noteTheme: 'Unconfirmed',
+        isConfident: false,
+        uncertainReason: 'confused_denominations',
+        rejectionReason: 'Currency results changed between live frames',
+        spokenFeedback,
+        timestamp: Date.now(),
+        inferenceMs,
+      }
+    } else {
+      const noNoteReading = readings.find((reading) => reading.state === 'NO_BANKNOTE_DETECTED') || readings[readings.length - 1]
+      result = { ...noNoteReading, inferenceMs, timestamp: Date.now() }
+    }
+
+    // Keep the diagnostic panel aligned with the final multi-frame decision,
+    // rather than leaving it on the last individual frame's prediction.
+    noteDetected = result.isConfident
+    lastBanknotePresence = result.banknotePresence
+    lastPresenceConfidence = Math.round(result.presenceConfidence * 100)
+    lastRecognitionState = result.state
+    lastPredictedClass = result.denomination
+    lastRawConfidence = result.rawConfidence
+    lastNoteDesign = result.note_design
+    lastRejectionReason = result.rejectionReason || null
+
+    if (shouldSpeak) {
+      const now = Date.now()
+      const isStableRecognition = result.isConfident && result.state === 'DENOMINATION_RECOGNISED'
+      const isNewDenomination = isStableRecognition && lastAnnouncedDenomination !== result.denomination
+      const debounceElapsed = now - lastAnnouncementTime > ANNOUNCEMENT_DEBOUNCE_MS
+      if (options?.forceAnnouncement || (isStableRecognition && (isNewDenomination || debounceElapsed))) {
+        lastAnnouncedDenomination = isStableRecognition ? result.denomination : null
+        lastAnnouncementTime = now
+        VoiceManager.setVolume(options?.speechVolume ?? 1)
+        VoiceManager.announce(result.spokenFeedback, 'MEDIUM', {
+          force: options?.forceAnnouncement,
+          lang,
+          domain: 'currency',
+        })
+      }
+    }
+
+    return result
+  } finally {
+    releaseQueue()
+  }
+}
+
 // ─── Multiple Notes Recognition (MODE B) ───
 
 export async function recognizeMultipleNotes(

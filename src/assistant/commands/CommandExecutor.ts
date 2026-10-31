@@ -16,7 +16,7 @@
 
 import { naviEmit, getLatestDetections } from '../../services/naviEventBus'
 import { RoadIntelligence } from '../../services/roadIntelligence'
-import { recognizeBanknote } from '../../services/currencyDetection'
+import { recognizeStableBanknote } from '../../services/currencyDetection'
 import { analyzeRoadSurfaceHeuristic } from '../../services/potholeDetection'
 import { RouteMemory } from '../../remember/RouteMemory'
 import { RouteTrackingService } from '../../services/RouteTrackingService'
@@ -281,11 +281,11 @@ export class CommandExecutorClass {
           }
         }
 
-        const res = await recognizeBanknote(video, { autoSpeak: false })
+        const res = await recognizeStableBanknote(video, { autoSpeak: false })
         if (!res.banknotePresence || !res.isConfident || res.denomination === 'NEGATIVE') {
           return {
             success: true,
-            spokenResponse: 'No genuine Indian banknote detected. Please hold the note flat and steady.',
+            spokenResponse: res.spokenFeedback || 'I could not confirm a banknote. Please hold one note flat and steady, then scan again.',
             actionTaken: 'NO_BANKNOTE',
             data: res,
           }

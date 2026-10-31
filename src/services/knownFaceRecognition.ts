@@ -36,9 +36,14 @@ function getHuman(): HumanFaceApi {
       modelBasePath: '/models/faces/',
       face: {
         enabled: true,
-        detector: { maxDetected: 5, rotation: true, return: true },
+        // This is a live matcher. Human's defaults reuse the detector box for
+        // up to 99 frames and the face descriptor for 3 seconds, which makes
+        // repeated checks compare stale frames instead of the current face.
+        detector: { maxDetected: 2, rotation: true, return: true, skipFrames: 0, skipTime: 0, minConfidence: 0.2 },
+        // Keep the same alignment path used when existing family profiles were
+        // enrolled; only disable stale frame/descriptor reuse above.
         mesh: { enabled: true },
-        description: { enabled: true },
+        description: { enabled: true, skipFrames: 0, skipTime: 0, minConfidence: 0.1 },
         iris: { enabled: false },
         emotion: { enabled: false },
         antispoof: { enabled: false },
@@ -87,22 +92,33 @@ export async function findKnownFace(
 ): Promise<FaceMatchResult> {
   await loadKnownFaceModel()
   const results = await getHuman().detect(input)
-  const faces = (results.face || []).filter((face) => face.embedding && (face.score ?? 0) >= 0.65)
+  const faces = (results.face || []).filter((face) => face.embedding && (face.score ?? 0) >= 0.5)
   if (faces.length !== 1 || !faces[0].embedding || profiles.length === 0) {
     return { profile: null, similarity: 0, faceCount: faces.length }
   }
 
   let best: FaceProfileMatch | null = null
   let bestSimilarity = 0
+  let secondBestSimilarity = 0
   for (const profile of profiles) {
+    if (profile.embedding.length !== faces[0].embedding.length) continue
     const similarity = getHuman().match.similarity(faces[0].embedding, profile.embedding)
-    if (Number.isFinite(similarity) && similarity > bestSimilarity) {
-      best = profile
-      bestSimilarity = similarity
+    if (Number.isFinite(similarity)) {
+      if (similarity > bestSimilarity) {
+        secondBestSimilarity = bestSimilarity
+        best = profile
+        bestSimilarity = similarity
+      } else if (similarity > secondBestSimilarity) {
+        secondBestSimilarity = similarity
+      }
     }
   }
 
-  // High threshold: uncertain faces remain unidentified.
-  if (bestSimilarity < 0.72) return { profile: null, similarity: bestSimilarity, faceCount: faces.length }
+  // A single saved photo and a different live pose can lower the score. Keep
+  // recognition cautious with a relative-margin check and repeated-frame
+  // confirmation in the live callers rather than an overly strict one-frame gate.
+  if (bestSimilarity < 0.6 || (profiles.length > 1 && bestSimilarity - secondBestSimilarity < 0.04)) {
+    return { profile: null, similarity: bestSimilarity, faceCount: faces.length }
+  }
   return { profile: best, similarity: bestSimilarity, faceCount: faces.length }
 }

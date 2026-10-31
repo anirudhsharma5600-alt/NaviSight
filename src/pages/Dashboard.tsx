@@ -29,7 +29,7 @@ import { VoiceManager, type AudioOperatingMode } from '../services/VoiceAnnounce
 import { PersonTracker } from '../services/PersonAnnouncementTracker'
 import { RoadIntelligence } from '../services/roadIntelligence'
 import {
-  recognizeBanknote, loadCurrencyModel, type CurrencyRecognitionResult,
+  recognizeStableBanknote, loadCurrencyModel, type CurrencyRecognitionResult,
 } from '../services/currencyDetection'
 import { NaviToolRouter } from '../assistant/NaviToolRouter'
 import { NaviLiveSession } from '../assistant/NaviLiveSession'
@@ -124,6 +124,7 @@ export default function Dashboard() {
   const lastCurrencyCheckTime = useRef(0)
   const isCurrencyScanningRef = useRef(false)
   const objectDetectionBusyRef = useRef(false)
+  const knownPersonAnalysisBusyRef = useRef(false)
   const lastAnnouncedCurrencyDenom = useRef<string | null>(null)
   const lastCurrencyAnnouncementTime = useRef(0)
   const lastCurrencyStatusKey = useRef<string | null>(null)
@@ -132,9 +133,14 @@ export default function Dashboard() {
   const reportKnownPersonStatus = useCallback((status: string) => {
     setKnownPersonStatus(status)
   }, [])
-  const canRunKnownPersonAnalysis = useCallback(() =>
-    !objectDetectionBusyRef.current && !isCurrencyScanningRef.current,
-  [])
+  const beginKnownPersonAnalysis = useCallback(() => {
+    if (objectDetectionBusyRef.current || isCurrencyScanningRef.current || knownPersonAnalysisBusyRef.current) return false
+    knownPersonAnalysisBusyRef.current = true
+    return true
+  }, [])
+  const endKnownPersonAnalysis = useCallback(() => {
+    knownPersonAnalysisBusyRef.current = false
+  }, [])
 
   const handleCameraInterrupted = useCallback((stream: MediaStream, message: string) => {
     if (streamRef.current !== stream) return
@@ -372,7 +378,11 @@ export default function Dashboard() {
     }
 
     const now = performance.now()
-    if (now - lastDetectionTime.current > detectionInterval) {
+    if (
+      now - lastDetectionTime.current > detectionInterval &&
+      !isCurrencyScanningRef.current &&
+      !knownPersonAnalysisBusyRef.current
+    ) {
       const start = performance.now()
       objectDetectionBusyRef.current = true
       try {
@@ -415,9 +425,13 @@ export default function Dashboard() {
         if (autoReadCurrency && now - lastCurrencyCheckTime.current > 1800 && !isCurrencyScanningRef.current) {
           lastCurrencyCheckTime.current = now
           isCurrencyScanningRef.current = true
-          recognizeBanknote(video, { autoSpeak: false, language: speechLanguage })
+          recognizeStableBanknote(video, { autoSpeak: false, language: speechLanguage })
             .then(res => {
               isCurrencyScanningRef.current = false
+              // Start the next auto-read delay after inference completes. A
+              // three-frame confirmation must not starve object/face analysis
+              // on a slower phone by immediately launching another scan.
+              lastCurrencyCheckTime.current = performance.now()
               if (session !== detectionSessionRef.current) return
               if (
                 res &&
@@ -426,10 +440,11 @@ export default function Dashboard() {
                 res.amount > 0 &&
                 res.denomination !== 'NEGATIVE'
               ) {
-                const timeSinceLast = now - lastCurrencyAnnouncementTime.current
+                const currencyReadAt = performance.now()
+                const timeSinceLast = currencyReadAt - lastCurrencyAnnouncementTime.current
                 const isNewNote = lastAnnouncedCurrencyDenom.current !== res.denomination
                 if (isNewNote || timeSinceLast > 5000) {
-                  lastCurrencyAnnouncementTime.current = now
+                  lastCurrencyAnnouncementTime.current = currencyReadAt
                   lastAnnouncedCurrencyDenom.current = res.denomination
                   lastCurrencyStatusKey.current = null
                   // Announce with MEDIUM priority (will NEVER interrupt HIGH priority proximity collision warnings)
@@ -472,6 +487,7 @@ export default function Dashboard() {
             })
             .catch(() => {
               isCurrencyScanningRef.current = false
+              lastCurrencyCheckTime.current = performance.now()
             })
         }
       } catch {
@@ -925,7 +941,7 @@ export default function Dashboard() {
     setIsVisionCurrencyScanning(true)
     VoiceManager.unlockVoice()
     try {
-      const res = await recognizeBanknote(video, {
+      const res = await recognizeStableBanknote(video, {
         language: speechLanguage,
         forceAnnouncement: true,
         autoSpeak: true,
@@ -962,6 +978,7 @@ export default function Dashboard() {
       })
     } finally {
       isCurrencyScanningRef.current = false
+      lastCurrencyCheckTime.current = performance.now()
       setIsVisionCurrencyScanning(false)
     }
   }, [cameraActive, speechLanguage])
@@ -1427,7 +1444,8 @@ export default function Dashboard() {
                         cameraActive={cameraActive}
                         video={videoRef.current}
                         language={speechLanguage}
-                        canAnalyze={canRunKnownPersonAnalysis}
+                        beginAnalysis={beginKnownPersonAnalysis}
+                        endAnalysis={endKnownPersonAnalysis}
                         onStatus={reportKnownPersonStatus}
                       />
                     </Suspense>
