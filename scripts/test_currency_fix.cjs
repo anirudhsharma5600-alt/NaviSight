@@ -256,3 +256,4 @@ async function runEndToEnd(session, imgPath) {
   console.log('  ALL CURRENCY VERIFICATION TESTS PASSED SUCCESSFULLY!  ');
   console.log('='.repeat(72));
 })();
+

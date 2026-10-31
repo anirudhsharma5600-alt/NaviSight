@@ -175,3 +175,4 @@ Per safety requirements, the original model was backed up prior to pipeline adju
 - **Active Production Model:** `public/models/currency/model.onnx` (6.11 MB, 8-Class MobileNetV3-Small)
 - **Rollback Copy:** `public/models/currency/model_v1_backup.onnx` (6.11 MB)
 - **PyTorch Checkpoint:** `ml/currency_recognition/currency_mobilenetv3_best.pth` (6.23 MB)
+
