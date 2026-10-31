@@ -19,6 +19,7 @@ import { VoiceManager, type VoiceStatus } from '../services/VoiceAnnouncementMan
 
 export default function CurrencyPage() {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const liveScanInProgressRef = useRef(false)
   const [cameraActive, setCameraActive] = useState(false)
   const [isStarting, setIsStarting] = useState(false)
   const [telemetry, setTelemetry] = useState<CameraTelemetry>(getCameraTelemetry())
@@ -205,13 +206,18 @@ export default function CurrencyPage() {
     if (!isLiveScanning || !cameraActive) return
 
     const interval = setInterval(() => {
-      if (!isScanning) {
-        if (scanMode === 'single') {
-          executeSingleScan(true)
-        } else {
-          executeMultiScan(true)
-        }
-      }
+      if (isScanning || liveScanInProgressRef.current) return
+      liveScanInProgressRef.current = true
+      setIsScanning(true)
+      const scan = scanMode === 'single'
+        ? executeSingleScan(true)
+        : executeMultiScan(true)
+      void scan.catch((error) => {
+        console.error('[CurrencyPage] Live scan failed:', error)
+      }).finally(() => {
+        liveScanInProgressRef.current = false
+        setIsScanning(false)
+      })
     }, 1000)
 
     return () => clearInterval(interval)
@@ -513,7 +519,7 @@ export default function CurrencyPage() {
                 )}
 
                 {/* Scanning Spinner */}
-                {isScanning && (
+                {isScanning && !isLiveScanning && (
                   <div className="absolute inset-0 bg-black/60 backdrop-blur-xs flex flex-col items-center justify-center gap-2">
                     <div className="w-10 h-10 border-3 border-cyan-400 border-t-transparent rounded-full animate-spin" />
                     <span className="text-xs font-semibold text-cyan-300">

@@ -1,13 +1,13 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Camera as CameraIcon, CameraOff, Volume2, VolumeX, Eye, Loader2,
   AlertCircle, AudioLines, Settings2, SlidersHorizontal,
   RefreshCw, SwitchCamera, Activity, CheckCircle2, XCircle, Info,
-  Banknote, X
+  Banknote, X, Users
 } from 'lucide-react'
 import {
-  loadModel, detectObjects, getModelStatus,
+  loadModel, detectObjects, getModelStatus, isModelLoaded,
   onModelStatusChange, getConfig, updateConfig, COCO_CLASSES,
   type Detection, type ModelStatus,
 } from '../services/objectDetection'
@@ -34,6 +34,8 @@ import {
 import { NaviToolRouter } from '../assistant/NaviToolRouter'
 import { NaviLiveSession } from '../assistant/NaviLiveSession'
 
+const KnownPersonLiveAssist = lazy(() => import('../components/KnownPersonLiveAssist'))
+
 // ─── Helper for readyState text ───
 function getReadyStateDescription(state: number): string {
   switch (state) {
@@ -50,7 +52,9 @@ export default function Dashboard() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const animationRef = useRef<number>(0)
+  const detectionSessionRef = useRef(0)
   const lastDetectionTime = useRef(0)
+  const lastModelRetryAtRef = useRef(0)
   const streamRef = useRef<MediaStream | null>(null)
   const isStartingRef = useRef(false)
 
@@ -77,7 +81,7 @@ export default function Dashboard() {
   const [showSettings, setShowSettings] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
   const [confidence, setConfidence] = useState(getConfig().confidenceThreshold)
-  const [detectionInterval, setDetectionInterval] = useState(200)
+  const [detectionInterval, setDetectionInterval] = useState(100)
 
   // Detailed Debug State (Requirement D)
   const [debugInfo, setDebugInfo] = useState({
@@ -101,17 +105,60 @@ export default function Dashboard() {
     return true
   })
   const [isVisionCurrencyScanning, setIsVisionCurrencyScanning] = useState(false)
+  const [knownPersonAssistEnabled, setKnownPersonAssistEnabled] = useState(false)
+  const [knownPersonStatus, setKnownPersonStatus] = useState('Saved-family matching is off.')
   const [visionCurrencyToast, setVisionCurrencyToast] = useState<{
     denomination: string
     amount: number
     confidence: number
     note_design: string
+    message: string
+    recognized: boolean
     timestamp: number
   } | null>(null)
   const lastCurrencyCheckTime = useRef(0)
   const isCurrencyScanningRef = useRef(false)
+  const objectDetectionBusyRef = useRef(false)
   const lastAnnouncedCurrencyDenom = useRef<string | null>(null)
   const lastCurrencyAnnouncementTime = useRef(0)
+  const lastCurrencyStatusKey = useRef<string | null>(null)
+  const lastCurrencyStatusTime = useRef(0)
+
+  const reportKnownPersonStatus = useCallback((status: string) => {
+    setKnownPersonStatus(status)
+  }, [])
+  const canRunKnownPersonAnalysis = useCallback(() =>
+    !objectDetectionBusyRef.current && !isCurrencyScanningRef.current,
+  [])
+
+  const handleCameraInterrupted = useCallback((stream: MediaStream, message: string) => {
+    if (streamRef.current !== stream) return
+
+    streamRef.current = null
+    isStartingRef.current = false
+    setIsStartingCamera(false)
+    if (videoRef.current?.srcObject === stream) videoRef.current.srcObject = null
+    setCameraActive(false)
+    setCameraError(message)
+    setCameraStatus('inactive')
+    setDetections([])
+    setSceneObjects([])
+    setLatestDetections([])
+    resetSceneAnalysis()
+    PersonTracker.reset()
+    RoadIntelligence.reset()
+    setDebugInfo((prev) => ({
+      ...prev,
+      streamStatus: 'error',
+      trackCount: 0,
+      trackLabel: '',
+      readyState: 0,
+      readyStateText: getReadyStateDescription(0),
+      videoWidth: 0,
+      videoHeight: 0,
+      errorMessage: message,
+    }))
+  }, [])
 
   // Pre-load dedicated currency model in background
   useEffect(() => {
@@ -124,12 +171,63 @@ export default function Dashboard() {
     return onModelStatusChange(setModelStatus)
   }, [])
 
-  // Load model on mount
+  // Retry model loading after a temporary offline failure. Camera inference is
+  // local once the model is ready, but the first model download needs a network.
+  const ensureObjectModelReady = useCallback((force = false) => {
+    if (isModelLoaded() || getModelStatus() === 'loading') return
+    if (!force && typeof navigator !== 'undefined' && !navigator.onLine) return
+
+    const now = Date.now()
+    if (!force && now - lastModelRetryAtRef.current < 2500) return
+    lastModelRetryAtRef.current = now
+    loadModel().catch((error) => {
+      console.warn('[ObjectDetection] Model load will be retried when the connection returns:', error)
+    })
+  }, [])
+
+  // Load model on mount and retry after connectivity or browser-tab restoration.
   useEffect(() => {
     if (modelStatus === 'idle') {
-      loadModel().catch(() => {})
+      ensureObjectModelReady(true)
     }
-  }, [modelStatus])
+  }, [modelStatus, ensureObjectModelReady])
+
+  useEffect(() => {
+    const recoverAfterReturn = () => {
+      if (document.visibilityState !== 'visible') return
+      ensureObjectModelReady()
+
+      if (!cameraActive) return
+      const stream = streamRef.current
+      const track = stream?.getVideoTracks()[0]
+      const video = videoRef.current
+      if (!stream || !track || track.readyState !== 'live' || !video || video.srcObject !== stream) {
+        if (stream) handleCameraInterrupted(stream, 'Camera feed stopped while Navi was in the background. Tap Retry Camera to reconnect.')
+        else {
+          setCameraActive(false)
+          setCameraError('Camera feed needs to be restarted. Tap Retry Camera to reconnect.')
+          setCameraStatus('inactive')
+        }
+        return
+      }
+
+      if (video.paused) {
+        video.play().catch(() => {
+          handleCameraInterrupted(stream, 'Camera playback paused when Navi returned. Tap Retry Camera to reconnect.')
+        })
+      }
+    }
+    const handleOnline = () => ensureObjectModelReady()
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('pageshow', recoverAfterReturn)
+    document.addEventListener('visibilitychange', recoverAfterReturn)
+    return () => {
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('pageshow', recoverAfterReturn)
+      document.removeEventListener('visibilitychange', recoverAfterReturn)
+    }
+  }, [cameraActive, ensureObjectModelReady, handleCameraInterrupted])
 
   // Update permission status via Permissions API
   const updatePermissionStatus = useCallback(async () => {
@@ -153,8 +251,14 @@ export default function Dashboard() {
       const devices = await navigator.mediaDevices.enumerateDevices()
       const videoDevices = devices.filter(d => d.kind === 'videoinput')
       setAvailableCameras(videoDevices)
-      if (videoDevices.length > 0 && !selectedCameraId) {
-        setSelectedCameraId(videoDevices[0].deviceId)
+      if (!selectedCameraId && videoDevices.length > 0) {
+        // Before permission, browsers hide labels and device ordering is not a
+        // reliable front/rear indicator. Leave the choice empty so getUserMedia
+        // can honor facingMode: environment instead of locking camera 0.
+        const activeDeviceId = streamRef.current?.getVideoTracks()[0]?.getSettings().deviceId
+        const rearCamera = videoDevices.find(device => /back|rear|environment|world/i.test(device.label))
+        const preferredDeviceId = activeDeviceId || rearCamera?.deviceId
+        if (preferredDeviceId) setSelectedCameraId(preferredDeviceId)
       }
     } catch (err: any) {
       console.warn('[Camera] Failed to enumerate devices:', err.message)
@@ -235,18 +339,25 @@ export default function Dashboard() {
   }, [scanAreaMode])
 
   // Detection loop
-  const detectLoop = useCallback(async () => {
+  const detectLoop = useCallback(async (session: number) => {
+    if (session !== detectionSessionRef.current) return
+    const scheduleNext = () => {
+      if (session !== detectionSessionRef.current) return
+      animationRef.current = requestAnimationFrame(() => { void detectLoop(session) })
+    }
     const video = videoRef.current
     if (!cameraActive || !video || video.readyState < 2 || video.videoWidth === 0) {
-      animationRef.current = requestAnimationFrame(detectLoop)
+      scheduleNext()
       return
     }
 
     const now = performance.now()
     if (now - lastDetectionTime.current > detectionInterval) {
       const start = performance.now()
+      objectDetectionBusyRef.current = true
       try {
         const allResults = await detectObjects(video)
+        if (session !== detectionSessionRef.current) return
         const results = keepDetectionsInScanArea(
           allResults,
           video.videoWidth,
@@ -266,26 +377,28 @@ export default function Dashboard() {
         processDetectionsForProximity(prioritizedDetections, video.videoWidth, video.videoHeight)
         setSensorDistance(getSensorDistance())
 
-        // Intelligent Person Event Tracking (Prevents repetitive shouts)
-        if (results.length > 0) {
-          PersonTracker.processFrame(results, video.videoWidth, video.videoHeight, {
-            generalNarrationEnabled: audioEnabled,
-          })
+        // Process empty frames too, so trackers can clear stale targets after
+        // someone or something leaves the selected scan area.
+        PersonTracker.processFrame(results, video.videoWidth, video.videoHeight, {
+          generalNarrationEnabled: audioEnabled,
+          language: speechLanguage,
+        })
 
-          // Intelligent Road Object & Vehicle Intelligence (Cars, Bikes, Signs, Benches, Obstacles)
-          RoadIntelligence.processFrame(results, video.videoWidth, video.videoHeight, {
-            generalNarrationEnabled: audioEnabled,
-          })
-        }
+        // Narrate detected objects (including non-road objects) in the chosen language.
+        RoadIntelligence.processFrame(results, video.videoWidth, video.videoHeight, {
+          generalNarrationEnabled: audioEnabled,
+          language: speechLanguage,
+        })
 
         // Auto-read Indian Currency when enabled (Throttled to every 1800ms)
         // Dedicated two-stage currency classifier runs independently without interrupting proximity warnings
         if (autoReadCurrency && now - lastCurrencyCheckTime.current > 1800 && !isCurrencyScanningRef.current) {
           lastCurrencyCheckTime.current = now
           isCurrencyScanningRef.current = true
-          recognizeBanknote(video, { autoSpeak: false })
+          recognizeBanknote(video, { autoSpeak: false, language: speechLanguage })
             .then(res => {
               isCurrencyScanningRef.current = false
+              if (session !== detectionSessionRef.current) return
               if (
                 res &&
                 res.isConfident &&
@@ -298,18 +411,42 @@ export default function Dashboard() {
                 if (isNewNote || timeSinceLast > 5000) {
                   lastCurrencyAnnouncementTime.current = now
                   lastAnnouncedCurrencyDenom.current = res.denomination
+                  lastCurrencyStatusKey.current = null
                   // Announce with MEDIUM priority (will NEVER interrupt HIGH priority proximity collision warnings)
-                  VoiceManager.announce(res.spokenFeedback, 'MEDIUM')
+                  VoiceManager.announce(res.spokenFeedback, 'MEDIUM', { lang: speechLanguage, domain: 'currency' })
                   setVisionCurrencyToast({
                     denomination: res.displayName,
                     amount: res.amount,
                     confidence: res.confidence,
                     note_design: res.note_design,
+                    message: res.spokenFeedback,
+                    recognized: true,
                     timestamp: Date.now(),
                   })
                   setTimeout(() => {
                     setVisionCurrencyToast(prev => (prev && Date.now() - prev.timestamp >= 4000 ? null : prev))
                   }, 4500)
+                }
+              } else if (res?.banknotePresence && !res.isConfident) {
+                const statusKey = `${res.state}:${res.rejectionReason || res.uncertainReason || 'uncertain'}`
+                const statusTime = Date.now()
+                if (statusKey !== lastCurrencyStatusKey.current || statusTime - lastCurrencyStatusTime.current > 8000) {
+                  lastCurrencyStatusKey.current = statusKey
+                  lastCurrencyStatusTime.current = statusTime
+                  VoiceManager.announce(res.spokenFeedback, 'MEDIUM', {
+                    lang: speechLanguage,
+                    cooldownMs: 8000,
+                    domain: 'currency',
+                  })
+                  setVisionCurrencyToast({
+                    denomination: 'Not confirmed',
+                    amount: 0,
+                    confidence: res.confidence,
+                    note_design: res.note_design,
+                    message: res.rejectionReason || res.spokenFeedback,
+                    recognized: false,
+                    timestamp: statusTime,
+                  })
                 }
               }
             })
@@ -319,22 +456,26 @@ export default function Dashboard() {
         }
       } catch {
         // skip frame on error
+      } finally {
+        objectDetectionBusyRef.current = false
       }
       lastDetectionTime.current = now
     }
 
-    animationRef.current = requestAnimationFrame(detectLoop)
-  }, [cameraActive, drawDetections, detectionInterval, scanAreaMode, audioEnabled, autoReadCurrency])
+    scheduleNext()
+  }, [cameraActive, drawDetections, detectionInterval, scanAreaMode, audioEnabled, autoReadCurrency, speechLanguage])
 
   // Start/stop detection loop
   useEffect(() => {
     if (cameraActive && modelStatus === 'ready') {
+      const session = ++detectionSessionRef.current
       setIsDetecting(true)
-      animationRef.current = requestAnimationFrame(detectLoop)
+      animationRef.current = requestAnimationFrame(() => { void detectLoop(session) })
     } else {
       setIsDetecting(false)
     }
     return () => {
+      detectionSessionRef.current += 1
       if (animationRef.current) cancelAnimationFrame(animationRef.current)
     }
   }, [cameraActive, modelStatus, detectLoop])
@@ -350,6 +491,10 @@ export default function Dashboard() {
     setVoiceAlertsEnabled(audioEnabled)
     updateProximityConfig({ language: speechLanguage })
   }, [audioEnabled, speechLanguage])
+
+  useEffect(() => {
+    VoiceManager.setLanguage(speechLanguage)
+  }, [speechLanguage])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -368,11 +513,17 @@ export default function Dashboard() {
       return
     }
     isStartingRef.current = true
+    // Invalidate any in-flight inference before stopping/replacing a stream.
+    detectionSessionRef.current += 1
+    if (animationRef.current) cancelAnimationFrame(animationRef.current)
+    setCameraActive(false)
     setIsStartingCamera(true)
     setCameraError('')
     unlockAudioContext() // Unlock Web Audio API on explicit user interaction
     initProximityEngine()
     resetSceneAnalysis()
+    PersonTracker.reset()
+    RoadIntelligence.reset()
 
     setDebugInfo(prev => ({
       ...prev,
@@ -419,10 +570,14 @@ export default function Dashboard() {
       return
     }
 
-    // Stop any existing stream before starting a new one
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(t => t.stop())
-      streamRef.current = null
+    // Release the old stream before requesting a replacement. Clear its ref
+    // first so a late `ended` event from the old track cannot mark the new
+    // camera session as interrupted.
+    const previousStream = streamRef.current
+    streamRef.current = null
+    if (previousStream) {
+      previousStream.getTracks().forEach(t => t.stop())
+      if (videoRef.current?.srcObject === previousStream) videoRef.current.srcObject = null
     }
 
     const deviceToUse = targetDeviceId !== undefined ? targetDeviceId : selectedCameraId
@@ -489,11 +644,17 @@ export default function Dashboard() {
     const activeTrack = tracks[0]
     const trackLabel = activeTrack ? activeTrack.label : 'Default Camera'
 
+    activeTrack?.addEventListener('ended', () => {
+      handleCameraInterrupted(stream, 'Camera feed stopped unexpectedly. Tap Retry Camera to reconnect.')
+    }, { once: true })
+
     // Check that the video element exists and its ref is correctly connected
     const video = videoRef.current
     if (!video) {
       const msg = 'Video element ref is not connected.'
       console.error('[Camera]', msg)
+      streamRef.current = null
+      stream.getTracks().forEach((track) => track.stop())
       setCameraError(msg)
       isStartingRef.current = false
       setIsStartingCamera(false)
@@ -537,6 +698,13 @@ export default function Dashboard() {
       console.warn('[Camera] video.play() was rejected or interrupted:', playErr.name, playErr.message)
     }
 
+    if (streamRef.current !== stream || (activeTrack && activeTrack.readyState !== 'live')) {
+      handleCameraInterrupted(stream, 'Camera feed stopped while it was starting. Tap Retry Camera to reconnect.')
+      isStartingRef.current = false
+      setIsStartingCamera(false)
+      return
+    }
+
     // Check videoWidth and videoHeight
     const width = video.videoWidth || 640
     const height = video.videoHeight || 480
@@ -567,16 +735,17 @@ export default function Dashboard() {
     // Enumerate devices now that permission is granted (device labels will now be available)
     updateAvailableCameras()
     updatePermissionStatus()
-  }, [selectedCameraId, updateAvailableCameras, updatePermissionStatus])
+  }, [selectedCameraId, updateAvailableCameras, updatePermissionStatus, handleCameraInterrupted])
 
   // Stop camera stream
   const stopCamera = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => {
+    const stream = streamRef.current
+    streamRef.current = null
+    if (stream) {
+      stream.getTracks().forEach((t) => {
         t.stop()
         console.log('[Camera] Stopped video track:', t.label)
       })
-      streamRef.current = null
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null
@@ -590,6 +759,8 @@ export default function Dashboard() {
     setLatestDetections([])
     resetSceneAnalysis()
     initProximityEngine()
+    PersonTracker.reset()
+    RoadIntelligence.reset()
     setDebugInfo(prev => ({
       ...prev,
       streamStatus: 'inactive',
@@ -616,11 +787,12 @@ export default function Dashboard() {
 
   // Retry Camera (Requirement E)
   const retryCamera = useCallback(() => {
+    ensureObjectModelReady()
     stopCamera()
     setTimeout(() => {
       startCamera()
     }, 200)
-  }, [stopCamera, startCamera])
+  }, [ensureObjectModelReady, stopCamera, startCamera])
 
   const describeSurroundings = useCallback(() => {
     const narration = describeScene(sceneObjects, scanAreaMode, speechLanguage, sensorDistance, sensorRangeTrend)
@@ -671,45 +843,71 @@ export default function Dashboard() {
   const handleScanCurrencyInVision = useCallback(async () => {
     const video = videoRef.current
     if (!video || !cameraActive) return
+    if (isCurrencyScanningRef.current) {
+      setVisionCurrencyToast({
+        denomination: 'Scan in progress',
+        amount: 0,
+        confidence: 0,
+        note_design: '',
+        message: 'Please wait for the current currency scan to finish.',
+        recognized: false,
+        timestamp: Date.now(),
+      })
+      return
+    }
+    isCurrencyScanningRef.current = true
     setIsVisionCurrencyScanning(true)
     VoiceManager.unlockVoice()
     try {
       const res = await recognizeBanknote(video, {
+        language: speechLanguage,
         forceAnnouncement: true,
         autoSpeak: true,
       })
-      if (
+      const recognized = Boolean(
         res &&
         res.isConfident &&
         res.state === 'DENOMINATION_RECOGNISED' &&
         res.amount > 0 &&
         res.denomination !== 'NEGATIVE'
-      ) {
-        setVisionCurrencyToast({
-          denomination: res.displayName,
-          amount: res.amount,
-          confidence: res.confidence,
-          note_design: res.note_design,
-          timestamp: Date.now(),
-        })
-        setTimeout(() => {
-          setVisionCurrencyToast(prev => (prev && Date.now() - prev.timestamp >= 4000 ? null : prev))
-        }, 5000)
-      }
+      )
+      setVisionCurrencyToast({
+        denomination: recognized ? res.displayName : 'Not confirmed',
+        amount: recognized ? res.amount : 0,
+        confidence: res.confidence,
+        note_design: recognized ? res.note_design : '',
+        message: recognized ? res.spokenFeedback : res.rejectionReason || res.spokenFeedback,
+        recognized,
+        timestamp: Date.now(),
+      })
+      setTimeout(() => {
+        setVisionCurrencyToast(prev => (prev && Date.now() - prev.timestamp >= 5000 ? null : prev))
+      }, 5200)
     } catch (err: any) {
       console.error('[Vision] Currency scan error:', err)
+      setVisionCurrencyToast({
+        denomination: 'Scan error',
+        amount: 0,
+        confidence: 0,
+        note_design: '',
+        message: err?.message || 'The currency scan could not complete.',
+        recognized: false,
+        timestamp: Date.now(),
+      })
     } finally {
+      isCurrencyScanningRef.current = false
       setIsVisionCurrencyScanning(false)
     }
-  }, [cameraActive])
+  }, [cameraActive, speechLanguage])
 
   // Cleanup on unmount only (Requirement C)
   useEffect(() => {
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop())
-        streamRef.current = null
-      }
+      const stream = streamRef.current
+      streamRef.current = null
+      stream?.getTracks().forEach((t) => t.stop())
+      NaviToolRouter.setActiveVideoElement(null)
+      NaviLiveSession.setVideoSource(null)
       stopSpeaking()
     }
   }, [])
@@ -971,7 +1169,7 @@ export default function Dashboard() {
                 />
                 <canvas
                   ref={canvasRef}
-                  className="absolute inset-0 w-full h-full pointer-events-none"
+                  className="absolute inset-0 w-full h-full object-cover pointer-events-none"
                 />
 
                 {/* Placeholder Overlay when camera is NOT active */}
@@ -1011,20 +1209,18 @@ export default function Dashboard() {
                       initial={{ opacity: 0, y: -20, scale: 0.95 }}
                       animate={{ opacity: 1, y: 0, scale: 1 }}
                       exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                      className="absolute top-3 right-3 left-auto z-30 max-w-sm bg-[#0a0e1a]/95 backdrop-blur-xl border border-emerald-500/40 rounded-xl p-3 shadow-2xl flex items-center justify-between text-white"
+                      className={`absolute top-3 right-3 left-auto z-30 max-w-sm bg-[#0a0e1a]/95 backdrop-blur-xl border rounded-xl p-3 shadow-2xl flex items-center justify-between text-white ${visionCurrencyToast.recognized ? 'border-emerald-500/40' : 'border-amber-500/50'}`}
                     >
                       <div className="flex items-center gap-2.5">
-                        <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center font-bold text-emerald-300 text-sm">
+                        <div className={`w-9 h-9 rounded-lg border flex items-center justify-center font-bold text-sm ${visionCurrencyToast.recognized ? 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300' : 'bg-amber-500/20 border-amber-400/40 text-amber-300'}`}>
                           ₹
                         </div>
                         <div>
-                          <div className="font-semibold text-emerald-300 flex items-center gap-1.5 text-xs">
-                            <span>{visionCurrencyToast.denomination} Banknote</span>
-                            <span className="text-[10px] font-normal px-1.5 py-0.2 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-emerald-200">
-                              {visionCurrencyToast.confidence}%
-                            </span>
+                          <div className={`font-semibold flex items-center gap-1.5 text-xs ${visionCurrencyToast.recognized ? 'text-emerald-300' : 'text-amber-300'}`}>
+                            <span>{visionCurrencyToast.recognized ? `${visionCurrencyToast.denomination} banknote` : `Currency: ${visionCurrencyToast.denomination}`}</span>
+                            {visionCurrencyToast.confidence > 0 && <span className="text-[10px] font-normal px-1.5 py-0.2 rounded-full bg-white/10 border border-white/15 text-gray-200">{visionCurrencyToast.confidence}%</span>}
                           </div>
-                          <p className="text-[11px] text-gray-300 truncate max-w-[200px]">{visionCurrencyToast.note_design}</p>
+                          <p className="text-[11px] text-gray-300 max-w-[240px]">{visionCurrencyToast.recognized ? visionCurrencyToast.note_design : visionCurrencyToast.message}</p>
                         </div>
                       </div>
                       <button
@@ -1085,6 +1281,7 @@ export default function Dashboard() {
                       onChange={(e) => switchCamera(e.target.value)}
                       className="bg-transparent text-xs text-white focus:outline-none cursor-pointer pr-1"
                     >
+                      {!selectedCameraId && <option value="" className="bg-navy-900 text-white">Default (rear camera preferred)</option>}
                       {availableCameras.map((cam, idx) => (
                         <option key={cam.deviceId || idx} value={cam.deviceId} className="bg-navy-900 text-white">
                           {cam.label || `Camera ${idx + 1}`}
@@ -1135,6 +1332,41 @@ export default function Dashboard() {
                 >
                   <AudioLines className="w-4 h-4" /> Describe Area
                 </button>
+
+                {/* Optional saved-family matcher; off by default and yields to the main detector. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !knownPersonAssistEnabled
+                    setKnownPersonAssistEnabled(next)
+                    if (!next) {
+                      setKnownPersonStatus('Saved-family matching is off.')
+                    } else {
+                      setKnownPersonStatus('Loading the optional family matcher…')
+                    }
+                  }}
+                  disabled={!cameraActive}
+                  aria-pressed={knownPersonAssistEnabled}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-full text-sm border transition-all disabled:opacity-40 ${knownPersonAssistEnabled ? 'bg-violet-500/20 text-violet-200 border-violet-400/40' : 'border-gray-600/30 hover:bg-white/5 text-gray-300'}`}
+                  title="Opt in to match one face against family photos saved on this device"
+                >
+                  <Users className="w-4 h-4" /> Family match: {knownPersonAssistEnabled ? 'ON' : 'OFF'}
+                </button>
+                {knownPersonAssistEnabled && (
+                  <>
+                    <span className="max-w-sm text-xs text-gray-300" role="status" aria-live="polite">{knownPersonStatus}</span>
+                    <Suspense fallback={<span className="text-xs text-gray-400">Preparing family matcher…</span>}>
+                      <KnownPersonLiveAssist
+                        enabled={knownPersonAssistEnabled}
+                        cameraActive={cameraActive}
+                        video={videoRef.current}
+                        language={speechLanguage}
+                        canAnalyze={canRunKnownPersonAnalysis}
+                        onStatus={reportKnownPersonStatus}
+                      />
+                    </Suspense>
+                  </>
+                )}
 
                 {/* Scan Currency Button (Requirement 1) */}
                 <button
@@ -1254,7 +1486,14 @@ export default function Dashboard() {
               {modelStatus === 'error' && (
                 <div className="text-red-400 text-sm text-center py-8">
                   <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                  Failed to load AI model. Check your connection and refresh.
+                  <p>AI model could not load. It will retry when the connection returns.</p>
+                  <button
+                    type="button"
+                    onClick={() => ensureObjectModelReady(true)}
+                    className="mt-3 inline-flex min-h-10 items-center justify-center rounded-xl border border-red-400/30 px-4 text-xs font-semibold text-red-200 transition-colors hover:bg-red-400/10"
+                  >
+                    Retry AI Model
+                  </button>
                 </div>
               )}
 

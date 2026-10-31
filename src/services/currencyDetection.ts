@@ -231,6 +231,7 @@ export const CURRENCY_DISCLAIMER =
 
 let session: ort.InferenceSession | null = null
 let modelStatus: CurrencyModelStatus = 'idle'
+let modelLoadPromise: Promise<boolean> | null = null
 let executionProvider = 'wasm'
 let loadDuration = 0
 let lastInferenceTime = 0
@@ -350,51 +351,57 @@ export function determineNoteDesign(
 
 // ─── Model Lifecycle ───
 
-export async function loadCurrencyModel(): Promise<boolean> {
-  if (session && modelStatus === 'ready') return true
-  if (modelStatus === 'loading') return false
+export function loadCurrencyModel(): Promise<boolean> {
+  if (session && modelStatus === 'ready') return Promise.resolve(true)
+  // Dashboard preloading and a user's first scan can happen together. Share
+  // the in-flight load instead of falsely reporting “unavailable” to the scan.
+  if (modelLoadPromise) return modelLoadPromise
 
   modelStatus = 'loading'
   const startTime = performance.now()
+  modelLoadPromise = (async () => {
+    try {
+      const cores = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2
+      ort.env.wasm.numThreads = Math.min(4, Math.max(1, Math.floor(cores / 2)))
+      ort.env.wasm.simd = true
 
-  try {
-    ort.env.wasm.numThreads = Math.min(4, Math.max(1, navigator.hardwareConcurrency ? Math.floor(navigator.hardwareConcurrency / 2) : 2))
-    ort.env.wasm.simd = true
+      const modelUrl = new URL('/models/currency/model.onnx', document.baseURI).toString()
+      const headCheck = await fetch(modelUrl, { method: 'HEAD' })
+      if (!headCheck.ok) {
+        throw new Error(`Currency model request failed (${headCheck.status}): ${modelUrl}`)
+      }
 
-    const headCheck = await fetch('/models/currency/model.onnx', { method: 'HEAD' })
-    if (!headCheck.ok) {
-      console.warn('[CurrencyModel] /models/currency/model.onnx not reachable.')
+      // Prefer WebGPU when available; ONNX Runtime will use WASM as fallback.
+      try {
+        session = await ort.InferenceSession.create(modelUrl, {
+          executionProviders: ['webgpu', 'wasm'],
+          graphOptimizationLevel: 'all',
+        })
+        executionProvider = 'webgpu/wasm'
+      } catch {
+        session = await ort.InferenceSession.create(modelUrl, {
+          executionProviders: ['wasm'],
+          graphOptimizationLevel: 'basic',
+        })
+        executionProvider = 'wasm'
+      }
+
+      loadDuration = Math.round(performance.now() - startTime)
+      modelStatus = 'ready'
+      lastInferenceError = null
+      console.log(`[CurrencyModel] Loaded 8-Class MobileNetV3 in ${loadDuration}ms using: ${executionProvider}`)
+      return true
+    } catch (err: any) {
+      console.error('[CurrencyModel] Initialization failed:', err)
       modelStatus = 'error'
-      lastInferenceError = 'Model file /models/currency/model.onnx not found'
+      lastInferenceError = err.message || 'Failed to initialize ONNX Runtime Web'
       return false
     }
+  })().finally(() => {
+    modelLoadPromise = null
+  })
 
-    // Try WebGPU first, then fallback to WebAssembly
-    try {
-      session = await ort.InferenceSession.create('/models/currency/model.onnx', {
-        executionProviders: ['webgpu', 'wasm'],
-        graphOptimizationLevel: 'all',
-      })
-      executionProvider = 'webgpu/wasm'
-    } catch {
-      session = await ort.InferenceSession.create('/models/currency/model.onnx', {
-        executionProviders: ['wasm'],
-        graphOptimizationLevel: 'basic',
-      })
-      executionProvider = 'wasm'
-    }
-
-    loadDuration = Math.round(performance.now() - startTime)
-    modelStatus = 'ready'
-    lastInferenceError = null
-    console.log(`[CurrencyModel] Loaded 8-Class MobileNetV3 in ${loadDuration}ms using: ${executionProvider}`)
-    return true
-  } catch (err: any) {
-    console.error('[CurrencyModel] Initialization failed:', err)
-    modelStatus = 'error'
-    lastInferenceError = err.message || 'Failed to initialize ONNX Runtime Web'
-    return false
-  }
+  return modelLoadPromise
 }
 
 export function getCurrencyModelInfo(): CurrencyModelInfo {
@@ -701,20 +708,13 @@ function extractTensorFromRegion(
     sw = Math.max(10, Math.min(srcWidth - sx, region.width))
     sh = Math.max(10, Math.min(srcHeight - sy, region.height))
   } else {
-    // Adaptive Banknote Focus Crop (Accommodates both horizontal & vertical orientations)
-    if (srcHeight > srcWidth) {
-      // Mobile Portrait Viewport: capture comfortable central inspection zone
-      sw = Math.round(srcWidth * 0.88)
-      sh = Math.round(srcWidth * 0.68)
-      sx = Math.round((srcWidth - sw) / 2)
-      sy = Math.round((srcHeight - sh) / 2)
-    } else {
-      // Landscape Viewport
-      sw = Math.round(srcWidth * 0.75)
-      sh = Math.round(srcHeight * 0.80)
-      sx = Math.round((srcWidth - sw) / 2)
-      sy = Math.round((srcHeight - sh) / 2)
-    }
+    // Use the same 2.25:1 horizontal window as the banknote guide and training
+    // preprocessing. The former near-square mobile crop clipped the long ends
+    // of a note and stretched mostly background into the classifier input.
+    sw = Math.round(srcWidth * 0.88)
+    sh = Math.min(Math.round(sw / 2.25), Math.round(srcHeight * 0.88))
+    sx = Math.round((srcWidth - sw) / 2)
+    sy = Math.round((srcHeight - sh) / 2)
   }
 
   ctx.drawImage(videoOrCanvas, sx, sy, sw, sh, 0, 0, 224, 224)
@@ -827,38 +827,9 @@ export async function recognizeBanknote(
   lastBanknotePresence = presence.hasBanknotePresence
   lastPresenceConfidence = Math.round(presence.presenceConfidence * 100)
 
-  if (!presence.hasBanknotePresence) {
-    noteDetected = false
-    lastPredictedClass = 'NEGATIVE'
-    lastRawConfidence = Math.round(presence.presenceConfidence * 100)
-    lastRecognitionState = 'NO_BANKNOTE_DETECTED'
-    lastRejectionReason = presence.rejectionReason || 'No physical banknote detected'
-
-    if (shouldSpeak && options?.forceAnnouncement) {
-      VoiceManager.announce(noBanknoteSpeech, 'MEDIUM', { force: true, lang })
-    }
-
-    return {
-      state: 'NO_BANKNOTE_DETECTED',
-      banknotePresence: false,
-      presenceConfidence: presence.presenceConfidence,
-      denomination: 'NEGATIVE',
-      note_design: 'Non-Banknote Object',
-      recognition_confidence: presence.presenceConfidence,
-      amount: 0,
-      displayName: 'No Banknote Detected',
-      confidence: Math.round(presence.presenceConfidence * 100),
-      rawConfidence: Math.round(presence.presenceConfidence * 100),
-      colorName: 'None',
-      noteTheme: 'None',
-      isConfident: false,
-      uncertainReason: 'ordinary_object',
-      rejectionReason: presence.rejectionReason,
-      spokenFeedback: noBanknoteSpeech,
-      timestamp: Date.now(),
-      inferenceMs: 0,
-    }
-  }
+  // The color/contrast gate is only a rough hint: a small note on a bright or
+  // dark background can fail it. Always let the negative-trained classifier
+  // confirm the frame instead of rejecting the banknote before inference.
 
   // ═══════════════════════════════════════════════════════════════════
   // STAGE B: DENOMINATION CLASSIFICATION (8-Class Neural Inference)
@@ -867,8 +838,21 @@ export async function recognizeBanknote(
   if (!session || modelStatus !== 'ready') {
     const loaded = await loadCurrencyModel()
     if (!loaded || !session) {
+      const modelUnavailableSpeech = lang === 'hi'
+        ? 'करेंसी मॉडल लोड नहीं हुआ। कृपया इंटरनेट कनेक्शन जांचकर फिर से कोशिश करें।'
+        : lang === 'pa'
+          ? 'ਕਰੰਸੀ ਮਾਡਲ ਲੋਡ ਨਹੀਂ ਹੋਇਆ। ਕਿਰਪਾ ਕਰਕੇ ਇੰਟਰਨੈੱਟ ਕਨੈਕਸ਼ਨ ਜਾਂਚ ਕੇ ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।'
+          : 'The currency model could not load. Check the connection and try again.'
+      noteDetected = false
+      lastBanknotePresence = presence.hasBanknotePresence
+      lastPresenceConfidence = Math.round(presence.presenceConfidence * 100)
+      lastRecognitionState = 'LOW_CONFIDENCE'
+      lastPredictedClass = 'Unavailable'
+      lastRawConfidence = 0
+      lastNoteDesign = 'Unavailable'
+      lastRejectionReason = lastInferenceError || 'Currency model unavailable'
       if (shouldSpeak && options?.forceAnnouncement) {
-        VoiceManager.announce(failSpeech, 'MEDIUM', { force: true, lang })
+        VoiceManager.announce(modelUnavailableSpeech, 'MEDIUM', { force: true, lang })
       }
       return {
         state: 'LOW_CONFIDENCE',
@@ -878,13 +862,14 @@ export async function recognizeBanknote(
         note_design: 'Unavailable',
         recognition_confidence: 0,
         amount: 0,
-        displayName: 'Unavailable',
+        displayName: 'Currency model unavailable',
         confidence: 0,
         rawConfidence: 0,
         colorName: 'None',
         noteTheme: 'None',
         isConfident: false,
-        spokenFeedback: failSpeech,
+        rejectionReason: lastInferenceError || 'Currency model unavailable',
+        spokenFeedback: modelUnavailableSpeech,
         timestamp: Date.now(),
         inferenceMs: 0,
       }
@@ -895,9 +880,13 @@ export async function recognizeBanknote(
   const { tensor, chromaticProfile, blurScore } = extractTensorFromRegion(videoOrCanvas)
 
   try {
-    const feeds: Record<string, ort.Tensor> = { input: tensor }
+    const inputName = session.inputNames[0] || 'input'
+    const feeds: Record<string, ort.Tensor> = { [inputName]: tensor }
     const results = await session.run(feeds)
-    const outputTensor = results.output || Object.values(results)[0]
+    const outputTensor = results[session.outputNames[0]] || results.output || Object.values(results)[0]
+    if (!outputTensor || outputTensor.data.length < CURRENCY_CLASSES.length) {
+      throw new Error(`Currency model returned ${outputTensor?.data.length ?? 0} scores; expected ${CURRENCY_CLASSES.length}.`)
+    }
     const rawLogits = outputTensor.data as Float32Array
 
     tensor.dispose()
@@ -916,16 +905,6 @@ export async function recognizeBanknote(
     const secondMatch = ranked[1]
     const scoreMargin = topMatch.prob - (secondMatch ? secondMatch.prob : 0)
 
-    // Secondary multi-cue verification for ambiguous pairs (INR_20 vs INR_200)
-    const diffRG = chromaticProfile.r - chromaticProfile.g
-    if (topMatch.cls === 'INR_20' || topMatch.cls === 'INR_200') {
-      if (diffRG > 20) {
-        topMatch = { cls: 'INR_200', prob: Math.max(topMatch.prob, 0.92) }
-      } else if (diffRG < 12) {
-        topMatch = { cls: 'INR_20', prob: Math.max(topMatch.prob, 0.94) }
-      }
-    }
-
     lastPredictedClass = topMatch.cls
     lastRawConfidence = Math.round(topMatch.prob * 100)
 
@@ -934,6 +913,8 @@ export async function recognizeBanknote(
       lastRecognitionState = 'NO_BANKNOTE_DETECTED'
       lastRejectionReason = 'Neural model classified region as ordinary non-banknote object'
       noteDetected = false
+      lastBanknotePresence = false
+      lastPresenceConfidence = Math.round((1 - topMatch.prob) * 100)
 
       if (shouldSpeak && options?.forceAnnouncement) {
         VoiceManager.announce(noBanknoteSpeech, 'MEDIUM', { force: true, lang })
@@ -1021,6 +1002,8 @@ export async function recognizeBanknote(
 
     lastRecognitionState = state
     noteDetected = isConfident
+    lastBanknotePresence = true
+    lastPresenceConfidence = Math.max(lastPresenceConfidence, Math.round(topMatch.prob * 100))
     lastRejectionReason = isConfident ? null : uncertainReason || 'Low confidence prediction'
 
     // Voice Announcement Dispatch via Central VoiceAnnouncementManager
@@ -1062,6 +1045,14 @@ export async function recognizeBanknote(
     tensor.dispose()
     lastInferenceError = err.message || 'Error executing ONNX inference'
     console.error('[CurrencyModel] Inference error:', err)
+    noteDetected = false
+    lastBanknotePresence = presence.hasBanknotePresence
+    lastPresenceConfidence = Math.round(presence.presenceConfidence * 100)
+    lastRecognitionState = 'LOW_CONFIDENCE'
+    lastPredictedClass = 'Error'
+    lastRawConfidence = 0
+    lastNoteDesign = 'Unavailable'
+    lastRejectionReason = lastInferenceError
     if (shouldSpeak && options?.forceAnnouncement) {
       VoiceManager.announce(failSpeech, 'MEDIUM', { force: true, lang })
     }
@@ -1195,8 +1186,12 @@ export async function recognizeMultipleNotes(
     }
 
     try {
-      const results = await session!.run({ input: tensor })
-      const outputTensor = results.output || Object.values(results)[0]
+      const inputName = session!.inputNames[0] || 'input'
+      const results = await session!.run({ [inputName]: tensor })
+      const outputTensor = results[session!.outputNames[0]] || results.output || Object.values(results)[0]
+      if (!outputTensor || outputTensor.data.length < CURRENCY_CLASSES.length) {
+        throw new Error(`Currency model returned ${outputTensor?.data.length ?? 0} scores; expected ${CURRENCY_CLASSES.length}.`)
+      }
       const probs = softmax(outputTensor.data as Float32Array)
       tensor.dispose()
 
@@ -1205,21 +1200,10 @@ export async function recognizeMultipleNotes(
         if (probs[i] > probs[maxIdx]) maxIdx = i
       }
 
-      let topCls = CURRENCY_CLASSES[maxIdx]
-      let topProb = probs[maxIdx]
+      const topCls = CURRENCY_CLASSES[maxIdx]
+      const topProb = probs[maxIdx]
 
-      // Disambiguate INR_20 vs INR_200
-      const diffRG = chromaticProfile.r - chromaticProfile.g
-      if (topCls === 'INR_20' || topCls === 'INR_200') {
-        if (diffRG > 20) {
-          topCls = 'INR_200'
-          topProb = Math.max(topProb, 0.90)
-        } else if (diffRG < 12) {
-          topCls = 'INR_20'
-          topProb = Math.max(topProb, 0.92)
-        }
-      }
-
+      if (topCls === 'NEGATIVE') continue
       const designInfo = determineNoteDesign(topCls, chromaticProfile)
 
       if (topProb >= 0.55) {
