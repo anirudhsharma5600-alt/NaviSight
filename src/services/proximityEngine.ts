@@ -1,5 +1,5 @@
 import type { Detection } from './objectDetection'
-import { speak } from './speechService'
+import { SmartAnnouncementManager } from './SmartAnnouncementManager'
 
 // ─── Proximity State Machine ───
 
@@ -27,6 +27,9 @@ export interface ProximityAlert {
   position: 'LEFT' | 'CENTRE' | 'RIGHT'
   timestamp: number
   isPerson: boolean
+  isMeasuredSensor: boolean
+  measuredDistanceCm: number | null
+  relativeProximityLabel: string
 }
 
 export interface ProximityConfig {
@@ -315,6 +318,10 @@ export function processDetectionsForProximity(
 
     const closenessScore = Math.min(100, Math.round((smoothedArea * 0.5 + heightRatio * 0.5) * 100))
 
+    const proximityLabel = bleConnected && sensorDistance !== null
+      ? `Calibrated ToF Sensor: ${Math.round(sensorDistance)} cm`
+      : `Approximate Relative Zone: ${zone === 'NEAR' ? 'Very Close' : zone === 'MEDIUM' ? 'Nearby' : 'Far'}`
+
     const alert: ProximityAlert = {
       objectId: det.id,
       objectClass: det.class,
@@ -328,6 +335,9 @@ export function processDetectionsForProximity(
       position: det.position,
       timestamp: now,
       isPerson,
+      isMeasuredSensor: bleConnected && sensorDistance !== null,
+      measuredDistanceCm: sensorDistance,
+      relativeProximityLabel: proximityLabel,
     }
 
     alerts.push(alert)
@@ -406,7 +416,6 @@ export function processDetectionsForProximity(
     ) {
       lastBeepTime = now
       playAlertPattern('CRITICAL')
-      triggerVibration('CRITICAL')
     }
   }
 

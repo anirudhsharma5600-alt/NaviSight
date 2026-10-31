@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ML Generated Datasets and Large Checkpoints
+ml/currency_recognition/dataset/
+*.pth

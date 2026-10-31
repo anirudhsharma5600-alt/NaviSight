@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react'
 import Navbar from './components/Navbar'
 import Footer from './components/Footer'
 import BottomNav from './components/BottomNav'
+import NaviFloatingAssistant from './components/NaviFloatingAssistant'
 import LoadingScreen from './components/LoadingScreen'
 
 const Home = lazy(() => import('./pages/Home'))
@@ -15,6 +16,7 @@ const StatusPage = lazy(() => import('./pages/StatusPage'))
 const CurrencyPage = lazy(() => import('./pages/CurrencyPage'))
 const PotholePage = lazy(() => import('./pages/PotholePage'))
 const KnownPeoplePage = lazy(() => import('./pages/KnownPeoplePage'))
+const RememberPage = lazy(() => import('./pages/RememberPage'))
 
 function App() {
   return (
@@ -33,9 +35,11 @@ function App() {
           <Route path="/currency" element={<CurrencyPage />} />
           <Route path="/known-people" element={<KnownPeoplePage />} />
           <Route path="/pothole" element={<PotholePage />} />
+          <Route path="/remember" element={<RememberPage />} />
         </Routes>
       </Suspense>
       <Footer />
+      <NaviFloatingAssistant />
       <BottomNav />
     </div>
   )

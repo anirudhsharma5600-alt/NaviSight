@@ -1,12 +1,12 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
-  Home, LayoutDashboard, Users, Banknote, Mic,
+  Home, LayoutDashboard, Compass, Banknote, Mic,
 } from 'lucide-react'
 
 const items = [
   { icon: Home, label: 'Home', path: '/' },
   { icon: LayoutDashboard, label: 'Vision', path: '/dashboard' },
-  { icon: Users, label: 'People', path: '/known-people' },
+  { icon: Compass, label: 'Remember', path: '/remember' },
   { icon: Banknote, label: 'Currency', path: '/currency' },
   { icon: Mic, label: 'Voice', path: '/voice' },
 ]

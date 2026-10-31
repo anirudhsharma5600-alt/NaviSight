@@ -1,0 +1,162 @@
+{
+  "timestamp": "2026-10-31T18:18:34Z",
+  "model_architecture": "MobileNetV3-Small",
+  "input_resolution": "224x224x3",
+  "classes": [
+    "INR_10",
+    "INR_20",
+    "INR_50",
+    "INR_100",
+    "INR_200",
+    "INR_500",
+    "INR_2000",
+    "NEGATIVE"
+  ],
+  "class_mapping": {
+    "10": 0,
+    "20": 1,
+    "50": 2,
+    "100": 3,
+    "200": 4,
+    "500": 5,
+    "2000": 6,
+    "NEGATIVE": 7
+  },
+  "train_samples": 1760,
+  "val_samples": 240,
+  "test_samples": 240,
+  "best_val_accuracy": 1.0,
+  "test_accuracy": 1.0,
+  "test_metrics": {
+    "INR_10": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_20": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_50": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_100": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_200": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_500": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "INR_2000": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    },
+    "NEGATIVE": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
+    }
+  },
+  "confusion_matrix": [
+    [
+      30,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      30,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      30,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      30,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      30,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      30,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      30,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      30
+    ]
+  ]
+}
