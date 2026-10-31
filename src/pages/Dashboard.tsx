@@ -249,14 +249,20 @@ export default function Dashboard() {
         }
 
         // Auto-read Indian Currency when enabled (Throttled to every 1800ms)
-        // Dedicated currency classifier runs independently without interrupting proximity warnings
+        // Dedicated two-stage currency classifier runs independently without interrupting proximity warnings
         if (autoReadCurrency && now - lastCurrencyCheckTime.current > 1800 && !isCurrencyScanningRef.current) {
           lastCurrencyCheckTime.current = now
           isCurrencyScanningRef.current = true
           recognizeBanknote(video, { autoSpeak: false })
             .then(res => {
               isCurrencyScanningRef.current = false
-              if (res && res.isConfident && res.amount > 0) {
+              if (
+                res &&
+                res.isConfident &&
+                res.state === 'DENOMINATION_RECOGNISED' &&
+                res.amount > 0 &&
+                res.denomination !== 'NEGATIVE'
+              ) {
                 const timeSinceLast = now - lastCurrencyAnnouncementTime.current
                 const isNewNote = lastAnnouncedCurrencyDenom.current !== res.denomination
                 if (isNewNote || timeSinceLast > 5000) {
@@ -593,7 +599,13 @@ export default function Dashboard() {
         forceAnnouncement: true,
         autoSpeak: true,
       })
-      if (res && res.isConfident && res.amount > 0) {
+      if (
+        res &&
+        res.isConfident &&
+        res.state === 'DENOMINATION_RECOGNISED' &&
+        res.amount > 0 &&
+        res.denomination !== 'NEGATIVE'
+      ) {
         setVisionCurrencyToast({
           denomination: res.displayName,
           amount: res.amount,

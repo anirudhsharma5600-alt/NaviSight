@@ -23,7 +23,7 @@ import torch.optim as optim
 from torchvision import models, transforms
 from PIL import Image
 
-CLASSES = ["10", "20", "50", "100", "200", "500", "2000"]
+CLASSES = ["10", "20", "50", "100", "200", "500", "2000", "NEGATIVE"]
 CLASS_TO_IDX = {
     "10": 0,
     "20": 1,
@@ -31,9 +31,19 @@ CLASS_TO_IDX = {
     "100": 3,
     "200": 4,
     "500": 5,
-    "2000": 6
+    "2000": 6,
+    "NEGATIVE": 7
 }
-IDX_TO_NAME = {v: f"INR_{k}" for k, v in CLASS_TO_IDX.items()}
+IDX_TO_NAME = {
+    0: "INR_10",
+    1: "INR_20",
+    2: "INR_50",
+    3: "INR_100",
+    4: "INR_200",
+    5: "INR_500",
+    6: "INR_2000",
+    7: "NEGATIVE"
+}
 
 class CurrencyDataset(torch.utils.data.Dataset):
     def __init__(self, root_dir, transform=None):

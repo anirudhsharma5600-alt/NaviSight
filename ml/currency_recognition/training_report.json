@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-10-31T16:11:27Z",
+  "timestamp": "2026-10-31T18:18:34Z",
   "model_architecture": "MobileNetV3-Small",
   "input_resolution": "224x224x3",
   "classes": [
@@ -9,7 +9,8 @@
     "INR_100",
     "INR_200",
     "INR_500",
-    "INR_2000"
+    "INR_2000",
+    "NEGATIVE"
   ],
   "class_mapping": {
     "10": 0,
@@ -18,11 +19,12 @@
     "100": 3,
     "200": 4,
     "500": 5,
-    "2000": 6
+    "2000": 6,
+    "NEGATIVE": 7
   },
-  "train_samples": 1540,
-  "val_samples": 210,
-  "test_samples": 210,
+  "train_samples": 1760,
+  "val_samples": 240,
+  "test_samples": 240,
   "best_val_accuracy": 1.0,
   "test_accuracy": 1.0,
   "test_metrics": {
@@ -67,6 +69,12 @@
       "recall": 1.0,
       "f1": 1.0,
       "support": 30
+    },
+    "NEGATIVE": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 30
     }
   },
   "confusion_matrix": [
@@ -77,9 +85,21 @@
       0,
       0,
       0,
+      0,
       0
     ],
     [
+      0,
+      30,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
       0,
       30,
       0,
@@ -91,17 +111,9 @@
     [
       0,
       0,
-      30,
-      0,
-      0,
-      0,
-      0
-    ],
-    [
-      0,
-      0,
       0,
       30,
+      0,
       0,
       0,
       0
@@ -113,6 +125,7 @@
       0,
       30,
       0,
+      0,
       0
     ],
     [
@@ -122,9 +135,21 @@
       0,
       0,
       30,
+      0,
       0
     ],
     [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      30,
+      0
+    ],
+    [
+      0,
       0,
       0,
       0,

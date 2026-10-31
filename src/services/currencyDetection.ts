@@ -3,6 +3,14 @@ import { VoiceManager } from './VoiceAnnouncementManager'
 
 // ─── Constants & Types ───
 
+export type BanknoteRecognitionState =
+  | 'BANKNOTE_DETECTED'
+  | 'DENOMINATION_RECOGNISED'
+  | 'NO_BANKNOTE_DETECTED'
+  | 'UNKNOWN_OBJECT'
+  | 'LOW_CONFIDENCE'
+  | 'MULTIPLE_NOTES_UNRESOLVED'
+
 export type CurrencyDenomination =
   | 'INR_10'
   | 'INR_20'
@@ -11,8 +19,20 @@ export type CurrencyDenomination =
   | 'INR_200'
   | 'INR_500'
   | 'INR_2000'
+  | 'NEGATIVE'
+
+export interface BanknotePresenceResult {
+  hasBanknotePresence: boolean
+  presenceConfidence: number
+  rejectionReason?: string
+  aspectRatioDetected: number
+  isScreenOrDocument: boolean
+}
 
 export interface CurrencyRecognitionResult {
+  state: BanknoteRecognitionState
+  banknotePresence: boolean
+  presenceConfidence: number
   denomination: CurrencyDenomination
   note_design: string
   recognition_confidence: number // 0 to 1 float
@@ -23,7 +43,15 @@ export interface CurrencyRecognitionResult {
   colorName: string
   noteTheme: string
   isConfident: boolean
-  uncertainReason?: 'low_contrast' | 'low_confidence' | 'confused_denominations' | 'partial_visible' | 'blur_detected'
+  uncertainReason?:
+    | 'no_banknote'
+    | 'ordinary_object'
+    | 'low_contrast'
+    | 'low_confidence'
+    | 'confused_denominations'
+    | 'partial_visible'
+    | 'blur_detected'
+  rejectionReason?: string
   spokenFeedback: string
   timestamp: number
   inferenceMs: number
@@ -76,10 +104,15 @@ export interface CurrencyDiagnosticsData {
   modelVersion: string
   modelInputSize: string
   cameraFrameReceived: boolean
+  banknotePresence: boolean
+  presenceConfidence: number
+  state: BanknoteRecognitionState
   noteDetected: boolean
   predictedDenomination: string
   rawConfidence: number
   finalConfidence: number
+  calibrationStatus: string
+  rejectionReason: string | null
   noteDesign: string
   speechStatus: string
   lastError: string | null
@@ -93,6 +126,7 @@ export const CURRENCY_CLASSES: CurrencyDenomination[] = [
   'INR_200',
   'INR_500',
   'INR_2000',
+  'NEGATIVE',
 ]
 
 export const CLASS_METADATA: Record<
@@ -178,6 +212,16 @@ export const CLASS_METADATA: Record<
     spokenHi: 'यह 2000 रुपये का नोट प्रतीत होता है।',
     spokenPa: 'ਇਹ 2000 ਰੁਪਏ ਦਾ ਨੋਟ ਜਾਪਦਾ ਹੈ।',
   },
+  NEGATIVE: {
+    amount: 0,
+    displayName: 'No Banknote',
+    color: '#64748b',
+    colorName: 'Ordinary Object / Non-Banknote',
+    motif: 'None',
+    spokenEn: 'No banknote detected.',
+    spokenHi: 'कोई बैंक नोट नहीं मिला।',
+    spokenPa: 'ਕੋਈ ਬੈਂਕ ਨੋਟ ਨਹੀਂ ਮਿਲਿਆ।',
+  },
 }
 
 export const CURRENCY_DISCLAIMER =
@@ -197,6 +241,13 @@ let cameraFrameReceived = false
 let noteDetected = false
 let lastInferenceError: string | null = null
 
+// Two-Stage & Calibration State
+let lastBanknotePresence = false
+let lastPresenceConfidence = 0
+let lastRecognitionState: BanknoteRecognitionState = 'NO_BANKNOTE_DETECTED'
+let lastCalibrationStatus = 'Calibrated (8-Class Negative-Trained Open-Set Rejection)'
+let lastRejectionReason: string | null = null
+
 // Voice alert debouncing state
 let lastAnnouncedDenomination: string | null = null
 let lastAnnouncementTime = 0
@@ -208,6 +259,14 @@ export function determineNoteDesign(
   cls: CurrencyDenomination,
   chroma: { r: number; g: number; b: number; contrast: number }
 ): { design: string; motif: string; colorName: string } {
+  if (cls === 'NEGATIVE') {
+    return {
+      design: 'Ordinary Object (Non-Banknote)',
+      motif: 'None',
+      colorName: 'Non-Banknote Surface',
+    }
+  }
+
   if (cls === 'INR_500') {
     // Check if Olive-Yellowish Green (Pre-2016 Mahatma Gandhi Legacy Series with Dandi March)
     // vs Stone Grey (2016 Mahatma Gandhi New Series with Red Fort)
@@ -328,7 +387,7 @@ export async function loadCurrencyModel(): Promise<boolean> {
     loadDuration = Math.round(performance.now() - startTime)
     modelStatus = 'ready'
     lastInferenceError = null
-    console.log(`[CurrencyModel] Loaded trained MobileNetV3 in ${loadDuration}ms using: ${executionProvider}`)
+    console.log(`[CurrencyModel] Loaded 8-Class MobileNetV3 in ${loadDuration}ms using: ${executionProvider}`)
     return true
   } catch (err: any) {
     console.error('[CurrencyModel] Initialization failed:', err)
@@ -341,8 +400,8 @@ export async function loadCurrencyModel(): Promise<boolean> {
 export function getCurrencyModelInfo(): CurrencyModelInfo {
   return {
     status: modelStatus,
-    modelName: 'MobileNetV3-Small (Indian Currency Multi-Series: Modern + Legacy)',
-    modelVersion: '2.2.0-multiseries',
+    modelName: 'MobileNetV3-Small (8-Class Negative-Trained Banknote Detector)',
+    modelVersion: '3.0.0-negative-calibrated',
     executionProvider,
     inputShape: '[1, 3, 224, 224]',
     supportedClasses: CURRENCY_CLASSES.map((c) => CLASS_METADATA[c].displayName),
@@ -362,17 +421,173 @@ export function getCurrencyModelStatus(): CurrencyModelStatus {
 export function getCurrencyDiagnostics(): CurrencyDiagnosticsData {
   return {
     modelLoaded: modelStatus === 'ready',
-    modelName: 'MobileNetV3-Small (Multi-Series)',
-    modelVersion: '2.2.0-multiseries',
+    modelName: 'MobileNetV3-Small (8-Class Negative-Calibrated)',
+    modelVersion: '3.0.0-negative-calibrated',
     modelInputSize: '224x224x3 (Float32)',
     cameraFrameReceived,
+    banknotePresence: lastBanknotePresence,
+    presenceConfidence: lastPresenceConfidence,
+    state: lastRecognitionState,
     noteDetected,
     predictedDenomination: lastPredictedClass,
     rawConfidence: lastRawConfidence,
     finalConfidence: noteDetected ? lastRawConfidence : 0,
+    calibrationStatus: lastCalibrationStatus,
+    rejectionReason: lastRejectionReason,
     noteDesign: lastNoteDesign,
     speechStatus: VoiceManager.getStatus().isSpeaking ? 'Speaking' : 'Idle',
     lastError: lastInferenceError,
+  }
+}
+
+// ─── STAGE A: Banknote Presence Detection ───
+
+export function detectBanknotePresence(
+  videoOrCanvas: HTMLVideoElement | HTMLCanvasElement,
+  region?: ImageRegion
+): BanknotePresenceResult {
+  const srcWidth = Math.max(1, 'videoWidth' in videoOrCanvas ? videoOrCanvas.videoWidth : videoOrCanvas.width)
+  const srcHeight = Math.max(1, 'videoHeight' in videoOrCanvas ? videoOrCanvas.videoHeight : videoOrCanvas.height)
+
+  const canvas = document.createElement('canvas')
+  canvas.width = 112
+  canvas.height = 112
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) {
+    return {
+      hasBanknotePresence: false,
+      presenceConfidence: 0,
+      rejectionReason: 'Canvas context acquisition failed',
+      aspectRatioDetected: 1.0,
+      isScreenOrDocument: false,
+    }
+  }
+
+  let sx = 0
+  let sy = 0
+  let sw = srcWidth
+  let sh = srcHeight
+
+  if (region) {
+    sx = Math.max(0, Math.min(srcWidth - 1, region.x))
+    sy = Math.max(0, Math.min(srcHeight - 1, region.y))
+    sw = Math.max(10, Math.min(srcWidth - sx, region.width))
+    sh = Math.max(10, Math.min(srcHeight - sy, region.height))
+  } else {
+    sw = Math.round(srcWidth * 0.75)
+    sh = Math.round(srcHeight * 0.75)
+    sx = Math.round((srcWidth - sw) / 2)
+    sy = Math.round((srcHeight - sh) / 2)
+  }
+
+  ctx.drawImage(videoOrCanvas, sx, sy, sw, sh, 0, 0, 112, 112)
+  const imgData = ctx.getImageData(0, 0, 112, 112)
+  const pixels = imgData.data
+  const totalPixels = 112 * 112
+
+  let sumR = 0
+  let sumG = 0
+  let sumB = 0
+  let sumLuma = 0
+  let minLuma = 255
+  let maxLuma = 0
+  let darkPixelCount = 0
+  let brightPixelCount = 0
+  let horizontalGradientSum = 0
+  let verticalGradientSum = 0
+
+  for (let i = 0; i < totalPixels; i++) {
+    const r = pixels[i * 4]
+    const g = pixels[i * 4 + 1]
+    const b = pixels[i * 4 + 2]
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b
+
+    sumR += r
+    sumG += g
+    sumB += b
+    sumLuma += luma
+
+    if (luma < minLuma) minLuma = luma
+    if (luma > maxLuma) maxLuma = luma
+    if (luma < 42) darkPixelCount++
+    if (luma > 218) brightPixelCount++
+
+    if (i % 112 < 111) {
+      const nextLuma = 0.299 * pixels[(i + 1) * 4] + 0.587 * pixels[(i + 1) * 4 + 1] + 0.114 * pixels[(i + 1) * 4 + 2]
+      horizontalGradientSum += Math.abs(nextLuma - luma)
+    }
+    if (i < totalPixels - 112) {
+      const downLuma = 0.299 * pixels[(i + 112) * 4] + 0.587 * pixels[(i + 112) * 4 + 1] + 0.114 * pixels[(i + 112) * 4 + 2]
+      verticalGradientSum += Math.abs(downLuma - luma)
+    }
+  }
+
+  const avgR = sumR / totalPixels
+  const avgG = sumG / totalPixels
+  const avgB = sumB / totalPixels
+  const avgLuma = sumLuma / totalPixels
+  const contrast = maxLuma - minLuma
+  const darkRatio = darkPixelCount / totalPixels
+  const brightRatio = brightPixelCount / totalPixels
+  const hGrad = horizontalGradientSum / totalPixels
+  const vGrad = verticalGradientSum / totalPixels
+
+  // 1. REJECT MONOCHROMATIC DARK SCREENS (VSCode / IDE / Terminal / Dark monitor)
+  if (darkRatio > 0.45 || (avgLuma < 52 && contrast < 95) || (avgLuma < 42 && avgR < 48 && avgG < 48 && avgB < 52)) {
+    return {
+      hasBanknotePresence: false,
+      presenceConfidence: 0.04,
+      rejectionReason: 'Monochromatic dark display screen (IDE / code editor / dark monitor)',
+      aspectRatioDetected: sw / sh,
+      isScreenOrDocument: true,
+    }
+  }
+
+  // 2. REJECT UNIFORM WHITE SHEETS / PLAIN PAPER / BLANK DOCUMENTS / RECEIPTS
+  const maxChannelDiff = Math.max(Math.abs(avgR - avgG), Math.abs(avgG - avgB), Math.abs(avgR - avgB))
+  if (brightRatio > 0.58 || (avgLuma > 212 && maxChannelDiff < 22)) {
+    return {
+      hasBanknotePresence: false,
+      presenceConfidence: 0.08,
+      rejectionReason: 'Uniform light surface / plain white paper / document page',
+      aspectRatioDetected: sw / sh,
+      isScreenOrDocument: true,
+    }
+  }
+
+  // 3. REJECT SOLID FEATURELESS WALLS OR DESK TOPS
+  if (contrast < 28 && hGrad < 1.1 && vGrad < 1.1) {
+    return {
+      hasBanknotePresence: false,
+      presenceConfidence: 0.06,
+      rejectionReason: 'Featureless solid surface (wall / desk / floor)',
+      aspectRatioDetected: sw / sh,
+      isScreenOrDocument: false,
+    }
+  }
+
+  // 4. CHROMATIC SPECTRUM CALIBRATION
+  let presenceScore = 0.65
+  // ₹10: Chocolate Brown
+  if (avgR > 95 && avgG > 55 && avgB < 95 && avgR > avgG && avgG > avgB) presenceScore = 0.88
+  // ₹20: Greenish Yellow
+  else if (avgG > 115 && avgR > 95 && avgB < 110 && avgG >= avgR * 0.9) presenceScore = 0.88
+  // ₹50: Fluorescent Blue
+  else if (avgB > 105 && avgB > avgR + 12) presenceScore = 0.88
+  // ₹100: Lavender
+  else if ((avgB > 95 && avgB > avgG + 6 && avgR > 85) || (avgR > 125 && avgG > 125 && avgB > 135)) presenceScore = 0.85
+  // ₹200: Bright Yellow
+  else if (avgR > 130 && avgG > 110 && avgB < 110 && avgR + avgG > avgB * 2.0) presenceScore = 0.90
+  // ₹500: Stone Grey / Green
+  else if (avgG >= avgR - 10 && avgG >= avgB - 10 && maxChannelDiff < 35 && avgLuma > 85 && avgLuma < 200) presenceScore = 0.88
+  // ₹2000: Magenta
+  else if (avgR > 125 && avgB > 90 && avgG < 105 && (avgR - avgG) > 22) presenceScore = 0.90
+
+  return {
+    hasBanknotePresence: true,
+    presenceConfidence: presenceScore,
+    aspectRatioDetected: sw / sh,
+    isScreenOrDocument: false,
   }
 }
 
@@ -503,7 +718,7 @@ function softmax(logits: Float32Array): number[] {
   return res
 }
 
-// ─── Single Note Recognition (MODE A) ───
+// ─── Single Note Recognition (MODE A: Two-Stage Verification) ───
 
 export async function recognizeBanknote(
   videoOrCanvas: HTMLVideoElement | HTMLCanvasElement,
@@ -525,16 +740,70 @@ export async function recognizeBanknote(
       ? 'क्षमा करें, मैं इस नोट को स्पष्ट रूप से नहीं पहचान सका। कृपया पुनः स्कैन करें।'
       : lang === 'pa'
       ? 'ਮਾਫ਼ ਕਰਨਾ, ਮੈਂ ਇਸ ਨੋਟ ਨੂੰ ਸਪਸ਼ਟ ਤੌਰ ਤੇ ਨਹੀਂ ਪਛਾਣ ਸਕਿਆ। ਕਿਰਪਾ ਕਰਕੇ ਦੁਬਾਰਾ ਸਕੈਨ ਕਰੋ।'
-      : 'Sorry, I cannot recognise this note clearly. Please scan again.'
+      : 'I cannot recognise this note clearly. Please scan again.'
+
+  const noBanknoteSpeech =
+    lang === 'hi'
+      ? 'कोई बैंक नोट नहीं मिला।'
+      : lang === 'pa'
+      ? 'ਕੋਈ ਬੈਂਕ ਨੋਟ ਨਹੀਂ ਮਿਲਿਆ।'
+      : 'No banknote detected.'
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STAGE A: BANKNOTE PRESENCE DETECTION
+  // ═══════════════════════════════════════════════════════════════════
+  const presence = detectBanknotePresence(videoOrCanvas)
+  lastBanknotePresence = presence.hasBanknotePresence
+  lastPresenceConfidence = Math.round(presence.presenceConfidence * 100)
+
+  if (!presence.hasBanknotePresence) {
+    noteDetected = false
+    lastPredictedClass = 'NEGATIVE'
+    lastRawConfidence = Math.round(presence.presenceConfidence * 100)
+    lastRecognitionState = 'NO_BANKNOTE_DETECTED'
+    lastRejectionReason = presence.rejectionReason || 'No physical banknote detected'
+
+    if (shouldSpeak && options?.forceAnnouncement) {
+      VoiceManager.announce(noBanknoteSpeech, 'MEDIUM', { force: true, lang })
+    }
+
+    return {
+      state: 'NO_BANKNOTE_DETECTED',
+      banknotePresence: false,
+      presenceConfidence: presence.presenceConfidence,
+      denomination: 'NEGATIVE',
+      note_design: 'Non-Banknote Object',
+      recognition_confidence: presence.presenceConfidence,
+      amount: 0,
+      displayName: 'No Banknote Detected',
+      confidence: Math.round(presence.presenceConfidence * 100),
+      rawConfidence: Math.round(presence.presenceConfidence * 100),
+      colorName: 'None',
+      noteTheme: 'None',
+      isConfident: false,
+      uncertainReason: 'ordinary_object',
+      rejectionReason: presence.rejectionReason,
+      spokenFeedback: noBanknoteSpeech,
+      timestamp: Date.now(),
+      inferenceMs: 0,
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STAGE B: DENOMINATION CLASSIFICATION (8-Class Neural Inference)
+  // ═══════════════════════════════════════════════════════════════════
 
   if (!session || modelStatus !== 'ready') {
     const loaded = await loadCurrencyModel()
     if (!loaded || !session) {
-      if (shouldSpeak) {
+      if (shouldSpeak && options?.forceAnnouncement) {
         VoiceManager.announce(failSpeech, 'MEDIUM', { force: true, lang })
       }
       return {
-        denomination: 'INR_10',
+        state: 'LOW_CONFIDENCE',
+        banknotePresence: true,
+        presenceConfidence: presence.presenceConfidence,
+        denomination: 'NEGATIVE',
         note_design: 'Unavailable',
         recognition_confidence: 0,
         amount: 0,
@@ -566,7 +835,7 @@ export async function recognizeBanknote(
     const inferDuration = Math.round(performance.now() - startInfer)
     lastInferenceTime = inferDuration
 
-    // Rank predictions by neural network confidence
+    // Rank predictions by neural network confidence across 8 classes
     const ranked = CURRENCY_CLASSES.map((cls, idx) => ({
       cls,
       prob: probs[idx] || 0,
@@ -589,29 +858,77 @@ export async function recognizeBanknote(
     lastPredictedClass = topMatch.cls
     lastRawConfidence = Math.round(topMatch.prob * 100)
 
+    // CHECK IF CLASSIFIED AS HARD NEGATIVE
+    if (topMatch.cls === 'NEGATIVE') {
+      lastRecognitionState = 'NO_BANKNOTE_DETECTED'
+      lastRejectionReason = 'Neural model classified region as ordinary non-banknote object'
+      noteDetected = false
+
+      if (shouldSpeak && options?.forceAnnouncement) {
+        VoiceManager.announce(noBanknoteSpeech, 'MEDIUM', { force: true, lang })
+      }
+
+      return {
+        state: 'NO_BANKNOTE_DETECTED',
+        banknotePresence: false,
+        presenceConfidence: 0.1,
+        denomination: 'NEGATIVE',
+        note_design: 'Ordinary Object (Non-Banknote)',
+        recognition_confidence: 0,
+        amount: 0,
+        displayName: 'No Banknote Detected',
+        confidence: Math.round(topMatch.prob * 100),
+        rawConfidence: Math.round(topMatch.prob * 100),
+        colorName: 'None',
+        noteTheme: 'None',
+        isConfident: false,
+        uncertainReason: 'ordinary_object',
+        rejectionReason: lastRejectionReason,
+        spokenFeedback: noBanknoteSpeech,
+        timestamp: Date.now(),
+        inferenceMs: inferDuration,
+      }
+    }
+
     const meta = CLASS_METADATA[topMatch.cls]
     const noteDesignInfo = determineNoteDesign(topMatch.cls, chromaticProfile)
     lastNoteDesign = noteDesignInfo.design
 
-    // Quality & Confidence Evaluation
+    // Calibrated Rejection and Uncertainty Check
     let isConfident = true
+    let state: BanknoteRecognitionState = 'DENOMINATION_RECOGNISED'
     let uncertainReason: CurrencyRecognitionResult['uncertainReason'] = undefined
     let spokenText = ''
 
-    if (chromaticProfile.contrast < 35) {
+    if (chromaticProfile.contrast < 30) {
       isConfident = false
+      state = 'LOW_CONFIDENCE'
       uncertainReason = 'low_contrast'
-      spokenText = failSpeech
+      spokenText =
+        lang === 'hi'
+          ? 'रोशनी बहुत कम है। कृपया नोट को स्पष्ट रूप से दिखाएं।'
+          : lang === 'pa'
+          ? 'ਰੋਸ਼ਨੀ ਬਹੁਤ ਘੱਟ ਹੈ। ਕਿਰਪਾ ਕਰਕੇ ਨੋਟ ਨੂੰ ਸਪਸ਼ਟ ਦਿਖਾਓ।'
+          : 'Lighting is low. Please hold the note clearly in front of the camera.'
     } else if (blurScore < 2.0 && chromaticProfile.contrast < 45) {
       isConfident = false
+      state = 'LOW_CONFIDENCE'
       uncertainReason = 'blur_detected'
       spokenText = failSpeech
-    } else if (topMatch.prob < 0.48) {
+    } else if (topMatch.prob < 0.70) {
+      // CALIBRATED REJECTION THRESHOLD: Require >= 0.70 (70%)
       isConfident = false
+      state = 'LOW_CONFIDENCE'
       uncertainReason = 'low_confidence'
-      spokenText = failSpeech
-    } else if (scoreMargin < 0.10 && topMatch.prob < 0.60) {
+      spokenText =
+        lang === 'hi'
+          ? 'कृपया नोट को कैमरे के सामने स्पष्ट रूप से पकड़ें।'
+          : lang === 'pa'
+          ? 'ਕਿਰਪਾ ਕਰਕੇ ਨੋਟ ਨੂੰ ਕੈਮਰੇ ਸਾਹਮਣੇ ਸਪਸ਼ਟ ਤੌਰ ਤੇ ਫੜੋ।'
+          : 'Please hold the note clearly in front of the camera.'
+    } else if (scoreMargin < 0.15) {
       isConfident = false
+      state = 'LOW_CONFIDENCE'
       uncertainReason = 'confused_denominations'
       spokenText =
         lang === 'hi'
@@ -620,11 +937,14 @@ export async function recognizeBanknote(
           ? 'ਕਿਰਪਾ ਕਰਕੇ ਇੱਕ ਸਮੇਂ ਵਿੱਚ ਇੱਕ ਹੀ ਨੋਟ ਸਕੈਨ ਕਰੋ।'
           : 'Please scan one note at a time.'
     } else {
-      // High-confidence recognition: exact requested speech format
+      // Verified High-Confidence Indian Banknote Recognition
+      state = 'DENOMINATION_RECOGNISED'
       spokenText = lang === 'hi' ? meta.spokenHi : lang === 'pa' ? meta.spokenPa : meta.spokenEn
     }
 
+    lastRecognitionState = state
     noteDetected = isConfident
+    lastRejectionReason = isConfident ? null : uncertainReason || 'Low confidence prediction'
 
     // Voice Announcement Dispatch via Central VoiceAnnouncementManager
     const now = Date.now()
@@ -642,6 +962,9 @@ export async function recognizeBanknote(
     }
 
     return {
+      state,
+      banknotePresence: true,
+      presenceConfidence: presence.presenceConfidence,
       denomination: topMatch.cls,
       note_design: isConfident ? noteDesignInfo.design : 'Uncertain Note Design',
       recognition_confidence: Math.round(topMatch.prob * 1000) / 1000,
@@ -653,6 +976,7 @@ export async function recognizeBanknote(
       noteTheme: isConfident ? noteDesignInfo.motif : meta.motif,
       isConfident,
       uncertainReason,
+      rejectionReason: lastRejectionReason || undefined,
       spokenFeedback: spokenText,
       timestamp: now,
       inferenceMs: inferDuration,
@@ -665,7 +989,10 @@ export async function recognizeBanknote(
       VoiceManager.announce(failSpeech, 'MEDIUM', { force: true, lang })
     }
     return {
-      denomination: 'INR_10',
+      state: 'LOW_CONFIDENCE',
+      banknotePresence: false,
+      presenceConfidence: 0,
+      denomination: 'NEGATIVE',
       note_design: 'Error',
       recognition_confidence: 0,
       amount: 0,
@@ -676,6 +1003,7 @@ export async function recognizeBanknote(
       noteTheme: 'None',
       isConfident: false,
       uncertainReason: 'low_confidence',
+      rejectionReason: lastInferenceError || undefined,
       spokenFeedback: failSpeech,
       timestamp: Date.now(),
       inferenceMs: 0,

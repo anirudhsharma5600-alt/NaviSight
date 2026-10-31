@@ -351,77 +351,87 @@ export default function CurrencyPage() {
 
             {/* 2. Model Name & Version */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5 col-span-2">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Model & Version</span>
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Model & Architecture</span>
               <span className="font-semibold text-white truncate block">{modelInfo.modelName} ({modelInfo.modelVersion})</span>
             </div>
 
-            {/* 3. Model Input Size */}
+            {/* 3. Stage A: Banknote Presence Result */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Model Input Size</span>
-              <span className="font-mono text-cyan-300">{modelInfo.inputShape}</span>
-            </div>
-
-            {/* 4. Camera Frame Received */}
-            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Frame Received</span>
-              <span className={`font-semibold ${cameraActive ? 'text-green-400' : 'text-gray-400'}`}>
-                {cameraActive ? 'YES' : 'NO'}
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Banknote Presence</span>
+              <span className={`font-semibold text-xs ${singleResult?.banknotePresence ? 'text-emerald-400' : 'text-amber-400'}`}>
+                {singleResult ? (singleResult.banknotePresence ? 'DETECTED' : 'NO_BANKNOTE') : 'AWAITING'}
               </span>
             </div>
 
-            {/* 5. Note Detected */}
+            {/* 4. Presence Confidence */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Note Detected</span>
-              <span className={`font-semibold ${singleResult?.isConfident ? 'text-green-400' : 'text-amber-400'}`}>
-                {singleResult?.isConfident ? 'YES' : 'NO'}
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Presence Conf</span>
+              <span className="font-mono font-bold text-cyan-300">
+                {singleResult ? Math.round((singleResult.presenceConfidence || 0) * 100) : 0}%
               </span>
             </div>
 
-            {/* 6. Predicted Denomination */}
+            {/* 5. Pipeline State */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Predicted Denom</span>
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Pipeline State</span>
+              <span className={`font-mono text-[11px] font-bold truncate block ${singleResult?.state === 'DENOMINATION_RECOGNISED' ? 'text-green-400' : singleResult?.state === 'NO_BANKNOTE_DETECTED' ? 'text-rose-400' : 'text-amber-300'}`}>
+                {singleResult?.state || 'IDLE'}
+              </span>
+            </div>
+
+            {/* 6. Raw Predicted Class */}
+            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Raw Output Class</span>
+              <span className="font-mono font-bold text-purple-400">
+                {singleResult ? singleResult.denomination : modelInfo.lastPredictedClass}
+              </span>
+            </div>
+
+            {/* 7. Final Denomination */}
+            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Final Denom</span>
               <span className="font-mono font-bold text-cyan-400">
-                {singleResult ? singleResult.displayName : modelInfo.lastPredictedClass !== 'None' ? modelInfo.lastPredictedClass : 'None'}
+                {singleResult?.isConfident ? singleResult.displayName : 'None'}
               </span>
             </div>
 
-            {/* 7. Raw Confidence */}
+            {/* 8. Raw Neural Confidence */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
               <span className="text-[10px] text-gray-400 uppercase font-mono block">Raw Confidence</span>
-              <span className="font-mono font-bold text-purple-400">
+              <span className="font-mono font-bold text-purple-300">
                 {singleResult ? singleResult.rawConfidence : modelInfo.lastRawConfidence}%
               </span>
             </div>
 
-            {/* 8. Final Confidence */}
+            {/* 9. Calibrated Final Confidence */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Final Confidence</span>
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Validated Conf</span>
               <span className="font-mono font-bold text-emerald-400">
                 {singleResult?.isConfident ? singleResult.confidence : 0}%
               </span>
             </div>
 
-            {/* 9. Note Design */}
+            {/* 10. Calibration Status */}
             <div className="bg-black/40 p-2.5 rounded-lg border border-white/5 col-span-2">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Note Design</span>
-              <span className="font-medium text-amber-200 truncate block">
-                {singleResult ? singleResult.note_design : modelInfo.lastNoteDesign}
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Calibration Status</span>
+              <span className="font-medium text-cyan-300 text-[11px] truncate block">
+                Two-Stage Open-Set Rejection (Threshold: 70%)
               </span>
             </div>
 
-            {/* 10. Speech Status */}
-            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Speech Status</span>
-              <span className={`font-semibold truncate block ${voiceStatus.lastError ? 'text-red-400' : voiceStatus.isSpeaking ? 'text-cyan-400' : 'text-green-400'}`}>
-                {voiceStatus.lastError ? 'Error' : voiceStatus.isSpeaking ? 'Speaking' : voiceStatus.voiceUnlocked ? 'Unlocked' : 'Locked'}
+            {/* 11. Rejection Reason */}
+            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5 col-span-2 sm:col-span-3 lg:col-span-4">
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Rejection / Uncertainty Reason</span>
+              <span className={`font-mono text-[11px] truncate block ${singleResult?.rejectionReason ? 'text-amber-300' : 'text-gray-400'}`}>
+                {singleResult?.rejectionReason || singleResult?.uncertainReason || 'None (Validated Physical Banknote)'}
               </span>
             </div>
 
-            {/* 11. Exact Error */}
-            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5 col-span-2 sm:col-span-3 lg:col-span-6">
-              <span className="text-[10px] text-gray-400 uppercase font-mono block">Exact Inference / Speech Error</span>
-              <span className={`font-mono text-xs ${voiceStatus.lastError ? 'text-red-400' : 'text-gray-400'}`}>
-                {voiceStatus.lastError ? voiceStatus.lastError : 'None (System Operating Normally)'}
+            {/* 12. Voice Announcement Status */}
+            <div className="bg-black/40 p-2.5 rounded-lg border border-white/5 col-span-2">
+              <span className="text-[10px] text-gray-400 uppercase font-mono block">Voice Announcement</span>
+              <span className={`font-semibold text-xs truncate block ${voiceStatus.isSpeaking ? 'text-cyan-400' : voiceStatus.voiceUnlocked ? 'text-green-400' : 'text-amber-400'}`}>
+                {voiceStatus.isSpeaking ? 'Announcing Now' : voiceStatus.voiceUnlocked ? 'Active & Ready' : 'Audio Locked (Tap to Unlock)'}
               </span>
             </div>
           </div>
