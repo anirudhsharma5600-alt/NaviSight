@@ -134,6 +134,8 @@ export default function Dashboard() {
   const handleCameraInterrupted = useCallback((stream: MediaStream, message: string) => {
     if (streamRef.current !== stream) return
 
+    detectionSessionRef.current += 1
+    if (animationRef.current) cancelAnimationFrame(animationRef.current)
     streamRef.current = null
     isStartingRef.current = false
     setIsStartingCamera(false)
@@ -204,9 +206,22 @@ export default function Dashboard() {
       if (!stream || !track || track.readyState !== 'live' || !video || video.srcObject !== stream) {
         if (stream) handleCameraInterrupted(stream, 'Camera feed stopped while Navi was in the background. Tap Retry Camera to reconnect.')
         else {
+          detectionSessionRef.current += 1
+          if (animationRef.current) cancelAnimationFrame(animationRef.current)
           setCameraActive(false)
           setCameraError('Camera feed needs to be restarted. Tap Retry Camera to reconnect.')
           setCameraStatus('inactive')
+          setDebugInfo((prev) => ({
+            ...prev,
+            streamStatus: 'error',
+            trackCount: 0,
+            trackLabel: '',
+            readyState: 0,
+            readyStateText: getReadyStateDescription(0),
+            videoWidth: 0,
+            videoHeight: 0,
+            errorMessage: 'Camera feed needs to be restarted after returning to Navi.',
+          }))
         }
         return
       }
