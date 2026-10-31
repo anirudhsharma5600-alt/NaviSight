@@ -102,6 +102,30 @@ function createIntents(navigate: (path: string) => void): Intent[] {
       },
     },
     {
+      name: 'proximity_alerts',
+      patterns: [/\b(proximity|distance|how close|beep|alarm)\b/i],
+      handler: () => {
+        navigate('/proximity')
+        return "Opening Proximity Alerts. You will hear dynamic audio beeps and vibration warnings as objects approach."
+      },
+    },
+    {
+      name: 'currency_reader',
+      patterns: [/\b(currency|rupee|note|money|cash|banknote)\b/i],
+      handler: () => {
+        navigate('/currency')
+        return "Opening Indian Currency Reader. Point your camera at a banknote to inspect its denomination."
+      },
+    },
+    {
+      name: 'pothole_detection',
+      patterns: [/\b(pothole|potholes|road hazard|crack|road damage)\b/i],
+      handler: () => {
+        navigate('/pothole')
+        return "Opening Road Hazard Detection. You can monitor the road ahead for potholes, cracks, and obstacles."
+      },
+    },
+    {
       name: 'navigate',
       patterns: [/\b(navigate|direction|where|map|location|gps)\b/i],
       handler: () => {
@@ -537,6 +561,21 @@ export default function VoiceAssistant() {
                 cmd: '"Read this text"',
                 desc: 'Go to OCR text recognition',
                 icon: BookOpen,
+              },
+              {
+                cmd: '"Proximity alerts"',
+                desc: 'Open proximity detection & audio beeps',
+                icon: Eye,
+              },
+              {
+                cmd: '"Read currency"',
+                desc: 'Identify Indian currency notes',
+                icon: BookOpen,
+              },
+              {
+                cmd: '"Detect potholes"',
+                desc: 'Scan road for surface hazards',
+                icon: Eye,
               },
               {
                 cmd: '"Help"',

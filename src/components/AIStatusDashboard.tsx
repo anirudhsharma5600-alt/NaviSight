@@ -2,13 +2,13 @@ import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import {
   Activity, Eye, Camera, Mic, Volume2, BookOpen, Brain,
-  Wifi, WifiOff, CheckCircle, XCircle, Loader2, AlertTriangle,
-  Cpu, HardDrive,
+  WifiOff, CheckCircle, XCircle, Loader2, AlertTriangle,
+  Cpu, HardDrive, Shield, ScanText
 } from 'lucide-react'
 import { getFullStatus, onStatusChange, type AIServiceStatus } from '../services/modelManager'
 import { COCO_CLASSES } from '../services/objectDetection'
 
-type StatusLevel = 'active' | 'ready' | 'available' | 'loading' | 'idle' | 'inactive' | 'disabled' | 'unsupported' | 'not_installed' | 'error'
+type StatusLevel = 'active' | 'ready' | 'available' | 'loading' | 'idle' | 'inactive' | 'disabled' | 'unsupported' | 'not_installed' | 'not_trained' | 'error'
 
 function StatusIcon({ level }: { level: StatusLevel }) {
   switch (level) {
@@ -22,6 +22,8 @@ function StatusIcon({ level }: { level: StatusLevel }) {
     case 'inactive':
     case 'disabled':
       return <div className="w-4 h-4 rounded-full border-2 border-gray-500" />
+    case 'not_trained':
+      return <AlertTriangle className="w-4 h-4 text-amber-400" />
     case 'unsupported':
     case 'not_installed':
       return <XCircle className="w-4 h-4 text-gray-500" />
@@ -29,21 +31,6 @@ function StatusIcon({ level }: { level: StatusLevel }) {
       return <AlertTriangle className="w-4 h-4 text-red-400" />
     default:
       return <div className="w-4 h-4 rounded-full border-2 border-gray-600" />
-  }
-}
-
-function statusColor(level: StatusLevel): string {
-  switch (level) {
-    case 'active':
-    case 'ready':
-    case 'available':
-      return 'text-green-400'
-    case 'loading':
-      return 'text-yellow-400'
-    case 'error':
-      return 'text-red-400'
-    default:
-      return 'text-gray-500'
   }
 }
 
@@ -72,60 +59,53 @@ export default function AIStatusDashboard() {
       details: `${COCO_CLASSES.length} classes · TensorFlow.js · Browser-local inference`,
     },
     {
+      name: 'Proximity Engine',
+      description: 'Bounding-box visual depth & Web Audio beep alarm',
+      status: aiStatus.proximityEngine as StatusLevel,
+      icon: Shield,
+      details: 'Warning, Danger, Critical zones · Web Audio API · Vibration & BLE ToF',
+    },
+    {
+      name: 'Currency Recognition',
+      description: 'MobileNetV3 Indian currency note classifier',
+      status: aiStatus.currencyRecognition as StatusLevel,
+      icon: ScanText,
+      details: '7 Indian Rupee denominations · Training pipeline in ml/currency_recognition/',
+    },
+    {
+      name: 'Road Hazard Intelligence',
+      description: 'YOLOv8n road damage & pothole detector',
+      status: aiStatus.roadIntelligence as StatusLevel,
+      icon: AlertTriangle,
+      details: 'RDD2022 dataset · Potholes & cracks · Training pipeline in ml/pothole_detection/',
+    },
+    {
       name: 'OCR Engine',
       description: 'Tesseract.js — Text recognition from images',
       status: aiStatus.ocrEngine as StatusLevel,
       icon: BookOpen,
-      details: 'English, Hindi, Punjabi · Image preprocessing · Browser-local',
+      details: 'English, Hindi, Punjabi · Image preprocessing · Browser-local WASM',
     },
     {
-      name: 'Camera',
-      description: 'MediaDevices API — Live video feed',
+      name: 'Camera System',
+      description: 'MediaDevices API — Live video stream',
       status: aiStatus.camera as StatusLevel,
       icon: Camera,
-      details: 'Environment-facing preferred · 640×480 for detection · 1280×720 for OCR',
-    },
-    {
-      name: 'Microphone',
-      description: 'MediaDevices API — Voice input',
-      status: aiStatus.microphone as StatusLevel,
-      icon: Mic,
-      details: 'Used by voice assistant for speech recognition',
+      details: 'Environment-facing preferred · Diagnostics & device switching',
     },
     {
       name: 'Voice Recognition',
-      description: 'Web Speech API — Speech to text',
+      description: 'Web Speech API — Hands-free voice commands',
       status: aiStatus.voiceRecognition as StatusLevel,
       icon: Mic,
-      details: 'Chrome/Edge supported · Click-to-talk interface',
+      details: 'Local speech recognition · Multi-command intent parser',
     },
     {
       name: 'Text to Speech',
-      description: 'SpeechSynthesis API — Spoken responses',
+      description: 'SpeechSynthesis API — Audio announcements',
       status: aiStatus.textToSpeech as StatusLevel,
       icon: Volume2,
-      details: 'Queue-based TTS · Pause/resume · Adjustable rate',
-    },
-    {
-      name: 'Wake Word Detection',
-      description: '"Hey Navi" — Hands-free activation',
-      status: aiStatus.wakeWord as StatusLevel,
-      icon: Mic,
-      details: 'Coming soon — requires local audio model',
-    },
-    {
-      name: 'Road Intelligence',
-      description: 'Pothole & hazard detection',
-      status: aiStatus.roadIntelligence as StatusLevel,
-      icon: AlertTriangle,
-      details: 'Coming soon — requires specialized model training',
-    },
-    {
-      name: 'Sound Intelligence',
-      description: 'Environmental sound classification',
-      status: aiStatus.soundIntelligence as StatusLevel,
-      icon: Volume2,
-      details: 'Coming soon — YAMNet audio classification',
+      details: 'Natural spoken descriptions · Queue-based speech synthesis',
     },
   ]
 
@@ -146,7 +126,7 @@ export default function AIStatusDashboard() {
             AI <span className="gradient-text">Status Dashboard</span>
           </h1>
           <p className="text-gray-400">
-            Real-time health monitor for all NaviAble AI services
+            Real-time health and deployment monitor for all NaviAble AI modules
           </p>
         </motion.div>
 
@@ -160,7 +140,7 @@ export default function AIStatusDashboard() {
               color: 'text-green-400',
             },
             {
-              label: 'AI Model',
+              label: 'Vision Model',
               value: aiStatus.objectDetection === 'ready' ? 'Loaded' : aiStatus.objectDetection,
               icon: Brain,
               color: aiStatus.objectDetection === 'ready' ? 'text-green-400' : 'text-yellow-400',
@@ -173,7 +153,7 @@ export default function AIStatusDashboard() {
             },
             {
               label: 'Processing',
-              value: 'Local Only',
+              value: '100% Client-Side',
               icon: HardDrive,
               color: 'text-neon-purple',
             },
@@ -198,17 +178,17 @@ export default function AIStatusDashboard() {
               <WifiOff className="w-5 h-5 text-green-400" />
             </div>
             <div>
-              <p className="text-green-400 font-medium text-sm">100% Local Processing</p>
+              <p className="text-green-400 font-medium text-sm">100% Local Processing & Privacy</p>
               <p className="text-gray-500 text-xs">
-                All AI inference runs in your browser. No data is sent to external servers.
-                Your camera feed, voice, and detected objects never leave your device.
+                All AI inference runs directly in your browser. No video, audio, or sensory data is sent to external servers.
+                Your camera feed and voice commands never leave your device.
               </p>
             </div>
           </div>
         </div>
 
         {/* Service Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
           {services.map((service, i) => (
             <motion.div
               key={service.name}
@@ -224,24 +204,26 @@ export default function AIStatusDashboard() {
                 </div>
                 <StatusIcon level={service.status} />
               </div>
-              <p className="text-gray-500 text-xs mb-3">{service.description}</p>
+              <p className="text-gray-400 text-xs mb-3">{service.description}</p>
               <div className="flex items-center justify-between">
                 <span
-                  className={`text-xs px-2 py-0.5 rounded-full border ${
+                  className={`text-xs px-2.5 py-0.5 rounded-full border capitalize ${
                     service.status === 'active' || service.status === 'ready' || service.status === 'available'
                       ? 'border-green-400/20 bg-green-400/5 text-green-400'
                       : service.status === 'loading'
                         ? 'border-yellow-400/20 bg-yellow-400/5 text-yellow-400'
-                        : service.status === 'error'
-                          ? 'border-red-400/20 bg-red-400/5 text-red-400'
-                          : 'border-gray-600/20 bg-gray-600/5 text-gray-500'
+                        : service.status === 'not_trained'
+                          ? 'border-amber-400/20 bg-amber-400/10 text-amber-400'
+                          : service.status === 'error'
+                            ? 'border-red-400/20 bg-red-400/5 text-red-400'
+                            : 'border-gray-600/20 bg-gray-600/5 text-gray-500'
                   }`}
                 >
-                  {service.status}
+                  {service.status.replace('_', ' ')}
                 </span>
               </div>
               {service.details && (
-                <p className="text-gray-600 text-xs mt-3 leading-relaxed">
+                <p className="text-gray-500 text-xs mt-3 leading-relaxed border-t border-white/5 pt-2">
                   {service.details}
                 </p>
               )}
@@ -257,32 +239,55 @@ export default function AIStatusDashboard() {
           className="glass-card p-6 mt-8"
         >
           <h3 className="font-display text-lg font-semibold mb-4 flex items-center gap-2">
-            <Brain className="w-5 h-5 text-cyan-400" /> Model Details
+            <Brain className="w-5 h-5 text-cyan-400" /> Architecture & Model Inventory
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div className="bg-white/[0.02] rounded-xl p-4 border border-white/5">
               <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
-                Object Detection
+                Active Object Detection
               </p>
               <p className="text-white font-medium">COCO-SSD (MobileNet v2)</p>
               <p className="text-gray-400 text-xs mt-1">
-                {COCO_CLASSES.length} object classes · Pre-trained on MS COCO ·
-                Apache 2.0 license
+                {COCO_CLASSES.length} object classes · Pre-trained on MS COCO · Apache 2.0 license
               </p>
               <p className="text-gray-500 text-xs mt-2">
-                Source: TensorFlow.js Models (@tensorflow-models/coco-ssd)
+                Status: Ready and running in-browser via TensorFlow.js
               </p>
             </div>
             <div className="bg-white/[0.02] rounded-xl p-4 border border-white/5">
               <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
-                Text Recognition
+                Text Recognition (OCR)
               </p>
-              <p className="text-white font-medium">Tesseract.js v5</p>
+              <p className="text-white font-medium">Tesseract.js v7</p>
               <p className="text-gray-400 text-xs mt-1">
-                100+ languages · Image preprocessing · Apache 2.0 license
+                English, Hindi, Punjabi · Grayscale/contrast preprocessing · WASM
               </p>
               <p className="text-gray-500 text-xs mt-2">
-                Source: tesseract.js (npm)
+                Status: Operational on camera frame captures
+              </p>
+            </div>
+            <div className="bg-white/[0.02] rounded-xl p-4 border border-white/5">
+              <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
+                Indian Currency Classifier
+              </p>
+              <p className="text-white font-medium">MobileNetV3-Small (Fine-tuned)</p>
+              <p className="text-gray-400 text-xs mt-1">
+                7 Denominations (₹10 - ₹2000) · Pipeline in ml/currency_recognition/
+              </p>
+              <p className="text-amber-400 text-xs mt-2">
+                Status: Pipeline built, pending GPU training
+              </p>
+            </div>
+            <div className="bg-white/[0.02] rounded-xl p-4 border border-white/5">
+              <p className="text-gray-500 text-xs uppercase tracking-wider mb-2">
+                Road Hazard & Pothole Detection
+              </p>
+              <p className="text-white font-medium">YOLOv8n (RDD2022 dataset)</p>
+              <p className="text-gray-400 text-xs mt-1">
+                Potholes, cracks & road damage · Pipeline in ml/pothole_detection/
+              </p>
+              <p className="text-amber-400 text-xs mt-2">
+                Status: Pipeline built, pending GPU training
               </p>
             </div>
           </div>
@@ -291,4 +296,3 @@ export default function AIStatusDashboard() {
     </div>
   )
 }
-
