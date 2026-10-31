@@ -20,11 +20,38 @@ export interface DetectionConfig {
 
 export type ModelStatus = 'idle' | 'loading' | 'ready' | 'error'
 
+// ─── Category-Calibrated Confidence Thresholds ───
+
+export const CATEGORY_THRESHOLDS: Record<string, number> = {
+  // Fast road vehicles (Safety critical: lower threshold to catch early)
+  car: 0.40,
+  motorcycle: 0.40,
+  bus: 0.40,
+  truck: 0.40,
+  bicycle: 0.42,
+  // Pedestrians (Debounce shadows / light poles)
+  person: 0.48,
+  // Traffic controls
+  'traffic light': 0.45,
+  'stop sign': 0.45,
+  // Walkway obstacles and furniture
+  bench: 0.45,
+  chair: 0.45,
+  'dining table': 0.48,
+  suitcase: 0.45,
+  backpack: 0.45,
+  'fire hydrant': 0.45,
+}
+
+export function getCalibratedThreshold(className: string, defaultThreshold: number): number {
+  return CATEGORY_THRESHOLDS[className.toLowerCase()] ?? defaultThreshold
+}
+
 // ─── Defaults ───
 
 const DEFAULT_CONFIG: DetectionConfig = {
-  confidenceThreshold: 0.45,
-  maxDetections: 15,
+  confidenceThreshold: 0.40, // Base threshold for raw model query
+  maxDetections: 20,
   iouThreshold: 0.5,
   enableTracking: true,
 }
@@ -243,21 +270,23 @@ export async function detectObjects(
   const scaleY = inputFrame === video ? 1 : video.videoHeight / (inputFrame as HTMLCanvasElement).height
   const videoWidth = video.videoWidth
 
-  let detections: Detection[] = predictions.map(p => ({
-    class: p.class,
-    score: p.score,
-    bbox: [
-      p.bbox[0] * scaleX,
-      p.bbox[1] * scaleY,
-      p.bbox[2] * scaleX,
-      p.bbox[3] * scaleY,
-    ] as [number, number, number, number],
-    position: calcPosition(
-      [p.bbox[0] * scaleX, p.bbox[1] * scaleY, p.bbox[2] * scaleX, p.bbox[3] * scaleY],
-      videoWidth
-    ),
-    id: 0,
-  }))
+  let detections: Detection[] = predictions
+    .filter(p => p.score >= getCalibratedThreshold(p.class, config.confidenceThreshold))
+    .map(p => ({
+      class: p.class,
+      score: p.score,
+      bbox: [
+        p.bbox[0] * scaleX,
+        p.bbox[1] * scaleY,
+        p.bbox[2] * scaleX,
+        p.bbox[3] * scaleY,
+      ] as [number, number, number, number],
+      position: calcPosition(
+        [p.bbox[0] * scaleX, p.bbox[1] * scaleY, p.bbox[2] * scaleX, p.bbox[3] * scaleY],
+        videoWidth
+      ),
+      id: 0,
+    }))
 
   // Apply NMS to remove duplicate boxes
   detections = applyNMS(detections, config.iouThreshold)

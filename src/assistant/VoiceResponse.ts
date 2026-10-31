@@ -52,12 +52,12 @@ export class VoiceResponseFormatter {
 
   public getCurrencyResult(amount: number, displayName: string, lang: AssistantLanguage = 'en'): string {
     if (lang === 'hi') {
-      return `यह ${amount} रुपये का नोट है।`
+      return `यह ${amount} रुपये का नोट प्रतीत होता है।`
     }
     if (lang === 'pa') {
-      return `ਇਹ ${amount} ਰੁਪਏ ਦਾ ਨੋਟ ਹੈ।`
+      return `ਇਹ ${amount} ਰੁਪਏ ਦਾ ਨੋਟ ਜਾਪਦਾ ਹੈ।`
     }
-    return `This is a ${amount}-rupee note.`
+    return `This appears to be a ${amount}-rupee note.`
   }
 
   public getCurrencyUncertain(lang: AssistantLanguage = 'en'): string {
