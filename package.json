@@ -8,6 +8,7 @@
     "dev:lan": "vite --host 0.0.0.0",
     "test:model": "node scripts/run_model.cjs",
     "build": "tsc -b && vite build",
+    "vercel-build": "npm run build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
