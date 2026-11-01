@@ -245,10 +245,40 @@ class NavigationEngineClass {
   private handleGPSUpdate(pos: GPSPosition) {
     if (this.isSimulating) return // Do not overwrite simulated GPS during simulation
 
-    // Jump filtering: reject updates claiming > 45 m/s speed for a walking user
-    if (this.currentPosition && pos.speed && pos.speed > 45) {
-      console.warn('[NavigationEngine] Filtered impossible GPS jump:', pos.speed, 'm/s')
+    // 1. Coordinate Validation
+    if (typeof pos.lat !== 'number' || typeof pos.lng !== 'number' || isNaN(pos.lat) || isNaN(pos.lng)) {
+      console.warn('[NavigationEngine] Filtered invalid NaN GPS coordinates')
       return
+    }
+    if (pos.lat < -90 || pos.lat > 90 || pos.lng < -180 || pos.lng > 180) {
+      console.warn('[NavigationEngine] Filtered out-of-range GPS coordinates:', pos.lat, pos.lng)
+      return
+    }
+
+    // 2. Stale Location Filtering (>15s old timestamp)
+    const ageMs = Math.abs(Date.now() - (pos.timestamp || Date.now()))
+    if (ageMs > 15000) {
+      console.warn('[NavigationEngine] Filtered stale GPS fix (age:', Math.round(ageMs / 1000), 's)')
+      return
+    }
+
+    // 3. Jump Filtering: reject updates claiming > 45 m/s speed or impossible displacement
+    if (this.currentPosition && pos.speed && pos.speed > 45) {
+      console.warn('[NavigationEngine] Filtered impossible GPS jump speed:', pos.speed, 'm/s')
+      return
+    }
+    if (this.currentPosition) {
+      const dtSec = Math.max(0.2, (pos.timestamp - this.currentPosition.timestamp) / 1000)
+      if (dtSec < 5) {
+        const dLat = (pos.lat - this.currentPosition.lat) * 111320
+        const dLng = (pos.lng - this.currentPosition.lng) * 111320 * Math.cos((pos.lat * Math.PI) / 180)
+        const distM = Math.hypot(dLat, dLng)
+        const impliedSpeed = distM / dtSec
+        if (impliedSpeed > 25) { // 25 m/s = 90 km/h is impossible for a pedestrian
+          console.warn('[NavigationEngine] Filtered impossible GPS coordinate jump:', Math.round(distM), 'm in', dtSec.toFixed(1), 's (implied:', Math.round(impliedSpeed), 'm/s)')
+          return
+        }
+      }
     }
 
     this.currentPosition = pos

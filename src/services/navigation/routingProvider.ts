@@ -136,7 +136,9 @@ export class GraphHopperRoutingProvider implements RoutingProvider {
         coordinate: coord,
         spokenNotice60m: `In approximately 60 metres, ${instruction.toLowerCase()}`,
         spokenNotice25m: `In approximately 25 metres, ${instruction.toLowerCase()}`,
-        spokenTurnNow: `${instruction} now`,
+        spokenTurnNow: maneuver === 'arrive'
+          ? 'Destination area reached. Please verify the exact entrance.'
+          : `${instruction.replace(/\b(cross|crossing)\b/gi, 'walk along')}.`,
       }
     })
 
@@ -196,7 +198,9 @@ export class OSRMFootRoutingProvider implements RoutingProvider {
         coordinate: [coord[0], coord[1]],
         spokenNotice60m: `In approximately 60 metres, ${instruction.toLowerCase()}`,
         spokenNotice25m: `In approximately 25 metres, ${instruction.toLowerCase()}`,
-        spokenTurnNow: `${instruction} now`,
+        spokenTurnNow: maneuver === 'arrive'
+          ? 'Destination area reached. Please verify the exact entrance.'
+          : `${instruction.replace(/\b(cross|crossing)\b/gi, 'walk along')}.`,
       }
     })
 

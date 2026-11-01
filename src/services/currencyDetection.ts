@@ -915,6 +915,9 @@ export async function recognizeBanknote(
     const rawLogits = outputTensor.data as Float32Array
 
     tensor.dispose()
+    if (outputTensor && typeof outputTensor.dispose === 'function') {
+      outputTensor.dispose()
+    }
 
     const probs = softmax(rawLogits)
     const inferDuration = Math.round(performance.now() - startInfer)

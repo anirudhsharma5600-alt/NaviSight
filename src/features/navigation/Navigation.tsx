@@ -78,6 +78,7 @@ export default function Navigation() {
     })
 
     return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current)
       unsubscribe()
     }
   }, [])
