@@ -251,3 +251,4 @@ In accordance with strict testing standards:
 1. **Web Workers for Inference:** Offload Tesseract OCR and COCO-SSD execution to a Dedicated Web Worker to eliminate main-thread frame drops during video rendering.
 2. **YOLOv8n-RDD2022 Cloud Training:** Train the PyTorch model defined in `ml/road_hazards/train_pothole_model.py` on Google Colab GPU using the RDD2022 dataset and export to ONNX Opset 14 for true neural pothole detection.
 3. **Compass / Gyroscope Integration:** Bind `deviceorientation` event to rotate MapLibre map camera in real-time according to the user's facing direction.
+
