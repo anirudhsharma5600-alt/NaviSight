@@ -284,12 +284,22 @@ export function getPerformanceMetrics() {
 
 let _resizeCanvas: OffscreenCanvas | HTMLCanvasElement | null = null
 
-function getResizedFrame(video: HTMLVideoElement, maxDim: number): HTMLCanvasElement | OffscreenCanvas | HTMLVideoElement {
-  const vw = video.videoWidth
-  const vh = video.videoHeight
-  if (!vw || !vh || vw <= 0 || vh <= 0) return video
+type DetectionImageSource = HTMLVideoElement | HTMLImageElement | HTMLCanvasElement
+
+function getSourceDimensions(source: DetectionImageSource): { width: number; height: number } {
+  if ('videoWidth' in source) return { width: source.videoWidth, height: source.videoHeight }
+  if ('naturalWidth' in source) return { width: source.naturalWidth, height: source.naturalHeight }
+  return { width: source.width, height: source.height }
+}
+
+function getResizedFrame(
+  source: DetectionImageSource,
+  maxDim: number,
+): HTMLCanvasElement | OffscreenCanvas | DetectionImageSource {
+  const { width: vw, height: vh } = getSourceDimensions(source)
+  if (!vw || !vh || vw <= 0 || vh <= 0) return source
   // Skip resize if already small enough
-  if (vw <= maxDim && vh <= maxDim) return video
+  if (vw <= maxDim && vh <= maxDim) return source
 
   const scale = Math.min(maxDim / vw, maxDim / vh)
   const tw = Math.round(vw * scale)
@@ -304,42 +314,44 @@ function getResizedFrame(video: HTMLVideoElement, maxDim: number): HTMLCanvasEle
   _resizeCanvas.height = th
 
   const ctx = _resizeCanvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
-  if (!ctx) return video
-  ctx.drawImage(video, 0, 0, tw, th)
-  return _resizeCanvas as HTMLCanvasElement
+  if (!ctx) return source
+  ctx.drawImage(source, 0, 0, tw, th)
+  return _resizeCanvas
 }
 
-// ─── Main Detection Function ───
-
-export async function detectObjects(
-  video: HTMLVideoElement,
-  options?: { resizeMaxDim?: number }
+async function detectFromSource(
+  source: DetectionImageSource,
+  options?: { resizeMaxDim?: number; track?: boolean },
 ): Promise<Detection[]> {
   if (!model) {
     await loadModel()
     if (!model) return []
   }
 
+  const { width: sourceWidth, height: sourceHeight } = getSourceDimensions(source)
+  if (!sourceWidth || !sourceHeight) return []
+
   const maxDim = options?.resizeMaxDim ?? 640
-  const inputFrame = getResizedFrame(video, maxDim) as HTMLCanvasElement | HTMLVideoElement
+  const inputFrame = getResizedFrame(source, maxDim) as HTMLCanvasElement | HTMLVideoElement | HTMLImageElement
 
   const start = performance.now()
   const predictions = await model.detect(inputFrame, config.maxDetections, config.confidenceThreshold)
   _lastInferenceMs = Math.round(performance.now() - start)
 
-  // FPS tracking
-  _frameCount++
-  const now = performance.now()
-  if (now - _lastFpsTime >= 1000) {
-    _currentFps = _frameCount
-    _frameCount = 0
-    _lastFpsTime = now
+  if (options?.track !== false && 'videoWidth' in source) {
+    // FPS tracking applies only to live camera frames, not static evaluation images.
+    _frameCount++
+    const now = performance.now()
+    if (now - _lastFpsTime >= 1000) {
+      _currentFps = _frameCount
+      _frameCount = 0
+      _lastFpsTime = now
+    }
   }
 
-  // Scale bounding boxes back to original video dimensions if we resized
-  const scaleX = inputFrame === video ? 1 : video.videoWidth / (inputFrame as HTMLCanvasElement).width
-  const scaleY = inputFrame === video ? 1 : video.videoHeight / (inputFrame as HTMLCanvasElement).height
-  const videoWidth = video.videoWidth
+  // Scale boxes back to the source's natural coordinate system after resizing.
+  const scaleX = inputFrame === source ? 1 : sourceWidth / (inputFrame as HTMLCanvasElement).width
+  const scaleY = inputFrame === source ? 1 : sourceHeight / (inputFrame as HTMLCanvasElement).height
 
   let detections: Detection[] = predictions
     .filter(p => p.score >= getCalibratedThreshold(p.class, config.confidenceThreshold))
@@ -354,7 +366,7 @@ export async function detectObjects(
       ] as [number, number, number, number],
       position: calcPosition(
         [p.bbox[0] * scaleX, p.bbox[1] * scaleY, p.bbox[2] * scaleX, p.bbox[3] * scaleY],
-        videoWidth
+        sourceWidth,
       ),
       id: 0,
     }))
@@ -362,10 +374,28 @@ export async function detectObjects(
   // Apply NMS to remove duplicate boxes
   detections = applyNMS(detections, config.iouThreshold)
 
-  // Assign stable IDs via temporal tracking
-  detections = assignIds(detections)
+  // Static evaluation images must not seed object IDs used by camera sessions.
+  detections = options?.track === false
+    ? detections.map(detection => ({ ...detection, id: 0 }))
+    : assignIds(detections)
 
   return detections
+}
+
+// ─── Main Detection Functions ───
+
+export function detectObjects(
+  video: HTMLVideoElement,
+  options?: { resizeMaxDim?: number },
+): Promise<Detection[]> {
+  return detectFromSource(video, options)
+}
+
+export function detectObjectsInImage(
+  image: HTMLImageElement | HTMLCanvasElement,
+  options?: { resizeMaxDim?: number },
+): Promise<Detection[]> {
+  return detectFromSource(image, { ...options, track: false })
 }
 
 // ─── COCO Class List (for reference) ───

@@ -17,6 +17,7 @@ const CurrencyPage = lazy(() => import('./pages/CurrencyPage'))
 const PotholePage = lazy(() => import('./pages/PotholePage'))
 const KnownPeoplePage = lazy(() => import('./pages/KnownPeoplePage'))
 const RememberPage = lazy(() => import('./pages/RememberPage'))
+const ModelEvaluationPage = lazy(() => import('./pages/ModelEvaluationPage'))
 
 function App() {
   return (
@@ -36,6 +37,7 @@ function App() {
           <Route path="/known-people" element={<KnownPeoplePage />} />
           <Route path="/pothole" element={<PotholePage />} />
           <Route path="/remember" element={<RememberPage />} />
+          {import.meta.env.DEV && <Route path="/model-evaluation" element={<ModelEvaluationPage />} />}
         </Routes>
       </Suspense>
       <Footer />

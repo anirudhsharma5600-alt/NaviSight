@@ -2,6 +2,8 @@
 **Document Version:** 3.1.0  
 **Evaluation Type:** OLD MODEL vs NEW MODEL Comparative Benchmarking  
 
+> **Evidence note (2 November 2026):** The prior `ml/evaluation/model_evaluator.py` printed fixed summary values instead of running inference or scoring a labeled hold-out set. The figures in this report are therefore not independently reproduced by that evaluator and must not be presented as verified accuracy or field-performance claims until their source datasets, run logs, and protocol are attached. A prediction-manifest evaluator is now available in `ml/evaluation/`; no valid general-object hold-out result exists yet.
+
 ---
 
 ## 1. Indian Currency Recognition: Model v1 vs Model v2

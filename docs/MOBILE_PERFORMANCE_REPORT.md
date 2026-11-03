@@ -1,7 +1,9 @@
 # NAVIABLE AI: MOBILE PERFORMANCE & COMPATIBILITY REPORT
 **Document Version:** 3.1.0  
 **Testing Targets:** Android Chrome (Google Pixel 7 / Samsung Galaxy A52) & iOS Safari (iPhone 13 / 14)  
-**Status:** PASS  
+**Status:** PENDING INDEPENDENT REPRODUCTION
+
+> **Evidence note (2 November 2026):** The figures below do not have matching device-run logs or a reproducible benchmark artifact in this repository. A separate audit also records that browser inference was not benchmarked. Treat these figures as historical, unverified notes—not measured product performance or investor claims—until they are rerun on named devices with saved logs.
 
 ---
 
