@@ -14,7 +14,7 @@
  */
 
 import { VoiceManager } from './VoiceAnnouncementManager'
-import type { Detection } from './objectDetection'
+import { getCalibratedThreshold, type Detection } from './objectDetection'
 
 export type RoadObjectClass =
   | 'vehicle'
@@ -169,6 +169,7 @@ class RoadIntelligenceEngine {
   private readonly SAME_OBJECT_COOLDOWN_MS = 12000 // 12 seconds per specific object instance
   private readonly CLASS_COOLDOWN_MS = 6000 // 6 seconds before repeating same class in same zone
   private readonly MIN_CONFIRMATION_FRAMES = 2 // Debounce transient false positives
+  private readonly MAX_TRACK_GAP_MS = 1200 // A missed object must re-confirm after a long detection gap
 
   private getObjectInfo(className: string): RoadObjectInfo {
     const key = className.toLowerCase()
@@ -214,9 +215,14 @@ class RoadIntelligenceEngine {
     const lang = options?.language || VoiceManager.getLanguage() || 'en'
     const shouldSpeak = options?.generalNarrationEnabled ?? false
 
-    // Keep all supported detector classes so common indoor objects are narrated too.
+    // Keep the detector's per-class calibration consistent through narration.
+    // The old fixed 0.45 floor discarded calibrated chair/vehicle detections
+    // that objectDetection had intentionally allowed through at a lower score.
     const roadDetections = detections.filter(d => {
-      const minimumScore = ROAD_OBJECT_CATALOG[d.class.toLowerCase()] ? 0.45 : 0.50
+      const className = d.class.toLowerCase()
+      const minimumScore = ROAD_OBJECT_CATALOG[className]
+        ? getCalibratedThreshold(className, 0.45)
+        : 0.50
       return d.score >= minimumScore
     })
 
@@ -263,12 +269,21 @@ class RoadIntelligenceEngine {
         }
         this.trackedObjects.set(det.id, tracked)
       } else {
+        const observationGap = now - tracked.lastSeen
+        tracked.consecutiveFrames = observationGap > this.MAX_TRACK_GAP_MS
+          ? 1
+          : tracked.consecutiveFrames + 1
         tracked.lastSeen = now
         tracked.position = det.position
         tracked.relativeArea = relArea
-        tracked.consecutiveFrames++
-        tracked.sizeHistory.push(relArea)
-        if (tracked.sizeHistory.length > 6) tracked.sizeHistory.shift()
+        if (observationGap > this.MAX_TRACK_GAP_MS) {
+          tracked.sizeHistory = [relArea]
+          tracked.isApproaching = false
+          tracked.isReceding = false
+        } else {
+          tracked.sizeHistory.push(relArea)
+          if (tracked.sizeHistory.length > 6) tracked.sizeHistory.shift()
+        }
 
         // Estimate relative movement from smoothed box-size changes. Camera
         // movement can also change apparent size, so narration stays tentative.
@@ -302,7 +317,7 @@ class RoadIntelligenceEngine {
 
     // Determine if an announcement should be dispatched
     if (shouldSpeak && roadDetections.length > 0) {
-      this.evaluateNarration(now, lang)
+      this.evaluateNarration(now, lang, currentIds)
     }
 
     return {
@@ -320,11 +335,16 @@ class RoadIntelligenceEngine {
   /**
    * Decide which object deserves narration, avoiding repetition.
    */
-  private evaluateNarration(now: number, lang: 'en' | 'hi' | 'pa') {
+  private evaluateNarration(
+    now: number,
+    lang: 'en' | 'hi' | 'pa',
+    currentIds: ReadonlySet<number>,
+  ) {
     // Collect candidate objects with enough consecutive frames
     const candidates = Array.from(this.trackedObjects.values())
-      // PersonCrowdIntelligence already handles people; avoid competing person narration.
-      .filter(o => o.className !== 'person' && o.consecutiveFrames >= this.MIN_CONFIRMATION_FRAMES)
+      // Speak only objects still inside the current scan area. Person narration
+      // stays with PersonCrowdIntelligence to avoid competing voice output.
+      .filter(o => currentIds.has(o.id) && o.className !== 'person' && o.consecutiveFrames >= this.MIN_CONFIRMATION_FRAMES)
       .sort((a, b) => {
         // Approaching objects first, then nearer objects, then receding objects.
         const movementRank = (object: TrackedRoadObject) => object.isApproaching ? 2 : object.isReceding ? 1 : 0
