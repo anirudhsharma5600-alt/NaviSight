@@ -60,7 +60,7 @@ For every measured run, record: run ID and feature/build version; phone model an
 | 8 | Integrate Meta glasses through the official Android DAT adapter | 12–24, plus device/access wait | Mock-session tests pass first; then a supported real glasses model passes camera, reconnect, permission, audio, latency, and user-control checks. |
 | 9 | Validate premium offer, pricing, support cost, and supervised pilot | 8–12, plus recruitment | Device matrix, bill of materials, service/support costs, target-market interviews, privacy review, and pilot metrics are recorded before a launch claim. |
 
-These ranges are planning estimates. Real-device access, user research, privacy review, and external SDK enrollment may add calendar time. The next step is only **Work block 0**; no later block starts automatically.
+These ranges are planning estimates. Real-device access, user research, privacy review, and external SDK enrollment may add calendar time. **Work block 0 is complete on the local laptop workflow. Work block 1 does not start until the user gives the pass/fail result or explicitly approves it.**
 
 ## Step-by-step work plan
 
@@ -129,11 +129,13 @@ Run a small, opt-in pilot with support and incident reporting. Track activation,
 - Provide clear camera/recording state, consent, deletion controls, and a privacy review before external pilots.
 - Publish only supported device/OS combinations and measured performance. Keep Meta partnership or approval claims separate from merely using its public SDK.
 
-## Immediate next task
+## Current status and next approval gate
 
-### Work block 0 — user-visible check, then stop
+### Work block 0 — local evaluation workflow (completed 3 November 2026)
 
-The evaluation page, manifest scorer, and development-only `/model-evaluation` route are implemented. TypeScript compilation and a production Vite build passed. I also opened the local route in a browser and confirmed the page renders after its lazy-load screen. Image import, box drawing, model prediction, and JSON download still need the user's hands-on check; no reviewed manifest exists yet.
+The assistant used only `test_assets/cat.jpg` and `test_assets/bus.jpg` on the local development-only `/model-evaluation` page. One ground-truth box was drawn and reviewed for each image. The detector returned `cat` at 98% and `bus` at 98%. The device field was `Windows laptop + ChatGPT in-app browser`, the split was `Validation`, and the evaluation JSON downloaded to `C:\Users\ABC\Downloads\NaviAble-object-baseline-v1-validation.json` without opening or editing it.
+
+This verifies the local laptop workflow with two bundled samples. It does not establish broad model accuracy or phone/glasses performance. The displayed 279.7 ms and 28.0 ms values are browser inference measurements, not camera-to-audio latency. Proof screenshots: [`workblock-0-evaluation.png`](../artifacts/workblock-0-evaluation.png) and [`workblock-0-bus-evaluation.png`](../artifacts/workblock-0-bus-evaluation.png).
 
 The team-provided Vercel URL was opened on 2 November 2026 and redirected to Vercel's login page, so its deployed app could not be reviewed anonymously. The local evaluation route is development-only and is not expected to exist on that deployment. Do not share login details; ask the team leader for a public demo deployment or a non-sensitive screen recording if external review is needed.
 
@@ -142,11 +144,13 @@ The team-provided Vercel URL was opened on 2 November 2026 and redirected to Ver
 3. Select two or three local sample images, label every visible supported object, run predictions, mark each full image as reviewed, and export the JSON.
 4. Confirm that the route works, the predictions and labels are visible, and the downloaded manifest contains no image pixels or original filenames.
 
-For the beginner-level click-by-click instructions, follow [Work block 0 test guide](WORKBLOCK_0_TEST_GUIDE_HI.md). The launcher also prints the exact evaluation URL so the user does not accidentally stay on the main homepage.
+The beginner-level [Work block 0 guide](WORKBLOCK_0_TEST_GUIDE_HI.md) remains available if the user wants to repeat the local workflow. The completed run used project samples; no personal images were needed.
 
-If the page fails, send the visible error or a screenshot and remain on Work block 0. If it passes, report the result; then ask the user whether to begin Work block 1. Do not implement Work block 1 before that approval.
+### Work block 1 — approved; sample workflow in progress
 
-After Work block 0 passes, collect varied, consented phone-camera scenes and record device model, OS/browser, model version, frame size, lighting, and network state. Keep capture sessions separated for train/validation/test. Use the baseline to choose one failure class before touching weights or starting training.
+The user approved Work block 1. A six-image batch from `test_assets/` was loaded in the local evaluator. In this run, `cat.jpg` has one correctly placed reviewed box; `bus.jpg` has a bus box awaiting a fresh visual alignment check; `person.jpg`, `sofa.jpg`, `traffic.jpg`, and `multi_200_100.jpg` are not yet labeled/reviewed. No Work block 1 detector run or manifest export has completed. The latest local browser call reports `Local browser use is disabled in Work settings`, so browser interaction is paused until it becomes available. Resume with the same project assets only. A temporary hidden-browser viewport override must be reset when possible.
+
+This six-image repository set can characterize only these samples. It cannot satisfy the full gate for distance/size variation, repeated capture sessions, or phone performance. After the local check, request consented varied phone-camera scenes and record device, OS/browser, model version, frame size, lighting, network state, and capture session. Keep train/validation/test sessions separate; use evidence to choose one failure class before changing weights or starting training. Wait for the user's pass/fail on this work block before moving to Work block 2.
 
 ## Official references checked on 2 November 2026
 
@@ -157,12 +161,12 @@ After Work block 0 passes, collect varied, consented phone-camera scenes and rec
 - [Meta Ray-Ban Display Web Apps](https://developers.meta.com/wearables/web-apps/)
 - [Ray-Ban US product listing and reference pricing](https://www.ray-ban.com/usa/ray-ban-meta-ai-glasses)
 
-## User test list for the next workflow (computer only)
+## Optional repeat checklist for Work block 0 (computer only)
 
-No phone or glasses are needed for this first check.
+The local sample workflow above has already been completed. No phone or glasses are needed if the user wants to reproduce the check.
 
 1. In the Antigravity terminal at the project folder, run `.\start-navi-dev.cmd`; leave the terminal open and wait for the `Local: http://localhost:5173/` line.
 2. In that same computer's browser, open `http://localhost:5173/model-evaluation`.
 3. Choose two or three images from `test_assets`, draw the correct class box for each visible target, and run the detector. The first run may download model weights; do not upload family photos or private images for this check.
 4. Enter `Windows laptop + browser name` in the device field, mark each image reviewed, then download the evaluation JSON. It is a results file; it does not contain the image pixels, and it does not need to be opened or edited.
-5. Tell me **pass** if the page loads, predictions appear, and the JSON downloads. If not, send the page screenshot plus the terminal's visible error text. We will fix Work block 0 only; after a pass, I will ask before starting Work block 1.
+5. If independently repeating, report **pass** if the page loads, predictions appear, and the JSON downloads. If not, share the page screenshot and terminal error. Stay on Work block 0 until it passes; ask before starting Work block 1.

@@ -1,6 +1,8 @@
 # Work block 0 — pehla test, bilkul basic steps
 
-Is test ke liye **phone ya glasses nahi chahiye**. Isse sirf local evaluation page, image labeling, detector run, aur results file download check honge. Is test se object detector ki accuracy pass/fail declare nahi hogi.
+**Status (3 November 2026):** local workflow `test_assets/cat.jpg` aur `test_assets/bus.jpg` se complete hua. Agar tum ise khud repeat karna chaho, neeche ke steps use karo. Is check ke liye laptop ke personal Pictures folder se images dhoondhne ki zaroorat nahi—samples project ke `test_assets` folder mein hain.
+
+Is test ke liye **phone ya glasses nahi chahiye**. Isse sirf local evaluation page, image labeling, detector run, aur results file download check honge. Is test se object detector ki overall accuracy pass/fail declare nahi hoti.
 
 ## A. Local website start karo
 
@@ -59,4 +61,4 @@ Box galat ban jaaye to us label ke paas **Remove** dabao, phir sahi box dobara d
 - **Pass:** evaluation page khuli, dono photos par box/label bana, model run hua, aur JSON file download hui.
 - **Fail:** jo step ruka uska screenshot bhejo; agar terminal mein laal error hai to uska photo/text bhi bhejo.
 
-Pass hone par main agla feature apne aap shuru nahi karunga—pehle tumse permission loonga. Fail hone par isi Work block 0 ko theek karenge.
+Agar tum is guide se khud dobara run karte ho: pass hone par main agla feature apne aap shuru nahi karunga—pehle tumse permission loonga. Fail hone par isi Work block 0 ko theek karenge.
