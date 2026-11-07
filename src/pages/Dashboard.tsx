@@ -126,7 +126,6 @@ export default function Dashboard() {
   const objectDetectionBusyRef = useRef(false)
   const knownPersonAnalysisBusyRef = useRef(false)
   const lastAnnouncedCurrencyDenom = useRef<string | null>(null)
-  const lastCurrencyAnnouncementTime = useRef(0)
   const lastCurrencyStatusKey = useRef<string | null>(null)
   const lastCurrencyStatusTime = useRef(0)
 
@@ -426,8 +425,8 @@ export default function Dashboard() {
           language: speechLanguage,
         })
 
-        // Auto-read Indian Currency when enabled (Throttled to every 1800ms)
-        // Dedicated two-stage currency classifier runs independently without interrupting proximity warnings
+        // Auto-read Indian Currency when enabled (throttled to every 1800ms).
+        // Speak once per visible denomination; manual Scan Currency remains available to repeat on demand.
         if (autoReadCurrency && now - lastCurrencyCheckTime.current > 1800 && !isCurrencyScanningRef.current) {
           lastCurrencyCheckTime.current = now
           isCurrencyScanningRef.current = true
@@ -446,15 +445,14 @@ export default function Dashboard() {
                 res.amount > 0 &&
                 res.denomination !== 'NEGATIVE'
               ) {
-                const currencyReadAt = performance.now()
-                const timeSinceLast = currencyReadAt - lastCurrencyAnnouncementTime.current
-                const isNewNote = lastAnnouncedCurrencyDenom.current !== res.denomination
-                if (isNewNote || timeSinceLast > 5000) {
-                  lastCurrencyAnnouncementTime.current = currencyReadAt
+                const isNewDenomination = lastAnnouncedCurrencyDenom.current !== res.denomination
+                if (isNewDenomination) {
+                  // Store the denomination only when the speech broker accepts it.
+                  // If output is muted/busy, the next scan can retry instead of losing the alert.
+                  const accepted = VoiceManager.announce(res.spokenFeedback, 'MEDIUM', { lang: speechLanguage, domain: 'currency' })
+                  if (!accepted) return
                   lastAnnouncedCurrencyDenom.current = res.denomination
                   lastCurrencyStatusKey.current = null
-                  // Announce with MEDIUM priority (will NEVER interrupt HIGH priority proximity collision warnings)
-                  VoiceManager.announce(res.spokenFeedback, 'MEDIUM', { lang: speechLanguage, domain: 'currency' })
                   setVisionCurrencyToast({
                     denomination: res.displayName,
                     amount: res.amount,
@@ -468,6 +466,10 @@ export default function Dashboard() {
                     setVisionCurrencyToast(prev => (prev && Date.now() - prev.timestamp >= 4000 ? null : prev))
                   }, 4500)
                 }
+              } else if (res?.state === 'NO_BANKNOTE_DETECTED') {
+                // A confirmed empty scan ends the current note event. If the same
+                // denomination appears later, it is eligible for one new announcement.
+                lastAnnouncedCurrencyDenom.current = null
               } else if (res?.banknotePresence && !res.isConfident) {
                 const statusKey = `${res.state}:${res.rejectionReason || res.uncertainReason || 'uncertain'}`
                 const statusTime = Date.now()
@@ -601,6 +603,8 @@ export default function Dashboard() {
       return
     }
     isStartingRef.current = true
+    lastAnnouncedCurrencyDenom.current = null
+    lastCurrencyStatusKey.current = null
     // Invalidate any in-flight inference before stopping/replacing a stream.
     detectionSessionRef.current += 1
     if (animationRef.current) cancelAnimationFrame(animationRef.current)
